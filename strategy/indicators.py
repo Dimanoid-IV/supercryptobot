@@ -1,13 +1,12 @@
 """
 Technical indicators module.
-Calculates EMA, RSI, ATR, and other indicators using pandas-ta.
+Calculates EMA, RSI, ATR, and other indicators using pure pandas.
 """
 
 from typing import Optional, Tuple
 from dataclasses import dataclass
 
 import pandas as pd
-import pandas_ta as ta
 import numpy as np
 
 from config import config
@@ -44,7 +43,7 @@ class Indicators:
     @staticmethod
     def calculate_ema(df: pd.DataFrame, period: int) -> pd.Series:
         """
-        Calculate Exponential Moving Average.
+        Calculate Exponential Moving Average using pandas ewm.
         
         Args:
             df: DataFrame with OHLCV data
@@ -55,12 +54,12 @@ class Indicators:
         """
         if len(df) < period:
             return pd.Series([np.nan] * len(df))
-        return ta.ema(df["close"], length=period)
+        return df["close"].ewm(span=period, adjust=False).mean()
     
     @staticmethod
     def calculate_rsi(df: pd.DataFrame, period: int = 14) -> pd.Series:
         """
-        Calculate Relative Strength Index.
+        Calculate Relative Strength Index using pandas.
         
         Args:
             df: DataFrame with OHLCV data
@@ -71,12 +70,18 @@ class Indicators:
         """
         if len(df) < period + 1:
             return pd.Series([np.nan] * len(df))
-        return ta.rsi(df["close"], length=period)
+        
+        delta = df["close"].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi
     
     @staticmethod
     def calculate_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
         """
-        Calculate Average True Range.
+        Calculate Average True Range using pandas.
         
         Args:
             df: DataFrame with OHLCV data
@@ -87,7 +92,14 @@ class Indicators:
         """
         if len(df) < period + 1:
             return pd.Series([np.nan] * len(df))
-        return ta.atr(df["high"], df["low"], df["close"], length=period)
+        
+        high_low = df["high"] - df["low"]
+        high_close = np.abs(df["high"] - df["close"].shift())
+        low_close = np.abs(df["low"] - df["close"].shift())
+        ranges = pd.concat([high_low, high_close, low_close], axis=1)
+        true_range = np.max(ranges, axis=1)
+        atr = true_range.rolling(window=period).mean()
+        return atr
     
     @staticmethod
     def calculate_volume_sma(df: pd.DataFrame, period: int = 20) -> pd.Series:
