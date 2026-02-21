@@ -1,0 +1,24 @@
+# Crypto Signal Bot Requirements
+# Python 3.11+
+
+# Bybit API
+pybit==5.8.0
+
+# Telegram Bot
+python-telegram-bot==21.10
+
+# Data Processing
+pandas==2.2.3
+numpy==2.2.2
+
+# Technical Analysis
+pandas-ta==0.3.14b0
+
+# HTTP Requests
+requests==2.32.3
+
+# Async Support
+aiohttp==3.11.11
+
+# Environment Variables (optional, for local development)
+python-dotenv==1.0.1
