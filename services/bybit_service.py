@@ -228,18 +228,19 @@ class BybitService:
         
         Args:
             symbol: Trading pair symbol
-            interval: Time interval for OI data
+            interval: Time interval for OI data (e.g., "5min", "15min", "1h")
             limit: Number of data points
             
         Returns:
             List of OpenInterest objects
         """
         try:
+            # Bybit API uses intervalTime parameter, not interval
             response = await self._make_request_with_retry(
                 self.session.get_open_interest,
                 category="linear",
                 symbol=symbol,
-                interval=interval,
+                intervalTime=interval,
                 limit=limit
             )
             
@@ -275,8 +276,9 @@ class BybitService:
             FundingRate object or None
         """
         try:
+            # pybit uses get_funding_rate_history method
             response = await self._make_request_with_retry(
-                self.session.get_funding_rate,
+                self.session.get_funding_rate_history,
                 category="linear",
                 symbol=symbol,
                 limit=1
