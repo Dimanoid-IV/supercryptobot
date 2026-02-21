@@ -133,19 +133,22 @@ class Indicators:
             return IndicatorValues()
         
         try:
+            # Work on a copy to avoid SettingWithCopy warnings
+            df = df.copy()
+            
             # Calculate EMAs
-            df["ema_21"] = cls.calculate_ema(df, config.EMA_SHORT)
-            df["ema_50"] = cls.calculate_ema(df, config.EMA_MEDIUM)
-            df["ema_200"] = cls.calculate_ema(df, config.EMA_LONG)
+            df.loc[:, "ema_21"] = cls.calculate_ema(df, config.EMA_SHORT)
+            df.loc[:, "ema_50"] = cls.calculate_ema(df, config.EMA_MEDIUM)
+            df.loc[:, "ema_200"] = cls.calculate_ema(df, config.EMA_LONG)
             
             # Calculate RSI
-            df["rsi"] = cls.calculate_rsi(df, config.RSI_PERIOD)
+            df.loc[:, "rsi"] = cls.calculate_rsi(df, config.RSI_PERIOD)
             
             # Calculate ATR
-            df["atr"] = cls.calculate_atr(df, config.ATR_PERIOD)
+            df.loc[:, "atr"] = cls.calculate_atr(df, config.ATR_PERIOD)
             
             # Calculate Volume SMA
-            df["volume_sma"] = cls.calculate_volume_sma(df, config.VOLUME_SMA_PERIOD)
+            df.loc[:, "volume_sma"] = cls.calculate_volume_sma(df, config.VOLUME_SMA_PERIOD)
             
             # Get latest values
             latest = df.iloc[-1]
