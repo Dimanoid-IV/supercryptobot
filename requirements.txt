@@ -8,8 +8,8 @@ pybit==5.8.0
 python-telegram-bot==21.10
 
 # Data Processing
-pandas==2.2.3
-numpy==2.2.2
+pandas==2.0.3
+numpy==1.24.3
 
 # Technical Analysis
 pandas-ta==0.3.14b0
