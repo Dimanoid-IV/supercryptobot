@@ -109,10 +109,12 @@ class CryptoSignalBot:
                 signal = await self._analyze_pair(pair)
                 
                 if signal and signal.is_valid:
+                    logger.info(f"[SIGNAL] VALID SIGNAL FOUND: {signal.pair} {signal.direction.value} (score: {signal.score})")
                     # Send signal
                     await self._send_signal(signal)
                     self.cooldown_manager.record_signal(pair.symbol)
                     signals_found += 1
+                    logger.info(f"[SIGNAL] Signal processing complete for {signal.pair}")
                     
                     # Stop if max signals reached
                     if signals_found >= config.MAX_SIGNALS_PER_DAY:
@@ -176,35 +178,42 @@ class CryptoSignalBot:
         Args:
             signal: TradingSignal to send
         """
-        # Create SignalMessage from TradingSignal
-        signal_message = self.telegram_service.create_signal_from_analysis(
-            pair=signal.pair,
-            direction=signal.direction.value,
-            entry_price=signal.entry_price,
-            stop_loss=signal.stop_loss,
-            take_profit=signal.take_profit,
-            score=signal.score,
-            trend_aligned=(
-                signal.trend_analysis.is_aligned_for_long 
-                if signal.direction == SignalDirection.LONG 
-                else signal.trend_analysis.is_aligned_for_short
-            ),
-            volume_above_avg=(
-                signal.indicators.volume_ratio is not None and 
-                signal.indicators.volume_ratio >= config.VOLUME_THRESHOLD
-            ),
-            oi_rising=True,  # Simplified - could be enhanced
-            atr_value=signal.indicators.atr or 0,
-            price_change_1h=0  # Could be passed from scanner
-        )
+        logger.info(f"[TELEGRAM] SENDING SIGNAL: {signal.pair} {signal.direction.value} @ {signal.entry_price}")
         
-        # Send to Telegram
-        success = await self.telegram_service.send_signal(signal_message)
-        
-        if success:
-            logger.info(f"Signal sent for {signal.pair}")
-        else:
-            logger.error(f"Failed to send signal for {signal.pair}")
+        try:
+            # Create SignalMessage from TradingSignal
+            signal_message = self.telegram_service.create_signal_from_analysis(
+                pair=signal.pair,
+                direction=signal.direction.value,
+                entry_price=signal.entry_price,
+                stop_loss=signal.stop_loss,
+                take_profit=signal.take_profit,
+                score=signal.score,
+                trend_aligned=(
+                    signal.trend_analysis.is_aligned_for_long 
+                    if signal.direction == SignalDirection.LONG 
+                    else signal.trend_analysis.is_aligned_for_short
+                ),
+                volume_above_avg=(
+                    signal.indicators.volume_ratio is not None and 
+                    signal.indicators.volume_ratio >= config.VOLUME_THRESHOLD
+                ),
+                oi_rising=True,  # Simplified - could be enhanced
+                atr_value=signal.indicators.atr or 0,
+                price_change_1h=0  # Could be passed from scanner
+            )
+            
+            # Send to Telegram
+            success = await self.telegram_service.send_signal(signal_message)
+            
+            if success:
+                logger.info(f"[TELEGRAM] Signal sent successfully for {signal.pair}")
+            else:
+                logger.error(f"[TELEGRAM] Failed to send signal for {signal.pair}")
+                
+        except Exception as e:
+            logger.error(f"[TELEGRAM] Exception while sending signal for {signal.pair}: {e}")
+            raise
     
     def stop(self):
         """Stop the bot."""

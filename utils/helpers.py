@@ -43,26 +43,16 @@ class SignalCooldown:
     """Track signal cooldowns per pair."""
     pair: str
     last_signal_time: Optional[datetime] = None
-    signals_today: int = 0
-    last_reset_date: Optional[datetime] = None
     
     def can_signal(self) -> bool:
         """Check if a new signal can be sent for this pair."""
         now = datetime.now()
         
-        # Reset daily counter if it's a new day
-        if self.last_reset_date is None or self.last_reset_date.date() != now.date():
-            self.signals_today = 0
-            self.last_reset_date = now
-        
-        # Check daily limit
-        if self.signals_today >= config.MAX_SIGNALS_PER_DAY:
-            return False
-        
-        # Check pair-specific cooldown
+        # Check pair-specific cooldown only (daily limit checked globally)
         if self.last_signal_time is not None:
             hours_since_last = (now - self.last_signal_time).total_seconds() / 3600
             if hours_since_last < config.MIN_HOURS_BETWEEN_SIGNALS_SAME_PAIR:
+                logger.debug(f"[COOLDOWN] {self.pair}: pair cooldown active ({hours_since_last:.1f}h < {config.MIN_HOURS_BETWEEN_SIGNALS_SAME_PAIR}h)")
                 return False
         
         return True
@@ -70,7 +60,7 @@ class SignalCooldown:
     def record_signal(self):
         """Record that a signal was sent."""
         self.last_signal_time = datetime.now()
-        self.signals_today += 1
+        logger.info(f"[COOLDOWN] {self.pair}: pair cooldown started for {config.MIN_HOURS_BETWEEN_SIGNALS_SAME_PAIR}h")
 
 
 class CooldownManager:
@@ -80,16 +70,16 @@ class CooldownManager:
         self._cooldowns: Dict[str, SignalCooldown] = {}
         self._total_signals_today = 0
         self._last_reset_date = datetime.now().date()
+        self._last_reset_datetime = datetime.now()
     
     def _reset_daily_if_needed(self):
         """Reset daily counters if it's a new day."""
         today = datetime.now().date()
         if today != self._last_reset_date:
+            logger.info(f"[COOLDOWN] New day detected! Resetting daily counter from {self._total_signals_today} to 0")
             self._total_signals_today = 0
             self._last_reset_date = today
-            # Reset all pair cooldowns
-            for cooldown in self._cooldowns.values():
-                cooldown.signals_today = 0
+            self._last_reset_datetime = datetime.now()
     
     def can_signal(self, pair: str) -> bool:
         """Check if a signal can be sent for the given pair."""
@@ -97,13 +87,21 @@ class CooldownManager:
         
         # Check global daily limit
         if self._total_signals_today >= config.MAX_SIGNALS_PER_DAY:
+            logger.info(f"[COOLDOWN] BLOCKED {pair}: daily limit reached ({self._total_signals_today}/{config.MAX_SIGNALS_PER_DAY})")
             return False
         
         # Check pair-specific cooldown
         if pair not in self._cooldowns:
             self._cooldowns[pair] = SignalCooldown(pair=pair)
+            logger.debug(f"[COOLDOWN] New pair tracking: {pair}")
         
-        return self._cooldowns[pair].can_signal()
+        pair_allowed = self._cooldowns[pair].can_signal()
+        if not pair_allowed:
+            logger.info(f"[COOLDOWN] BLOCKED {pair}: pair-specific cooldown active")
+            return False
+        
+        logger.debug(f"[COOLDOWN] ALLOWED {pair}: daily {self._total_signals_today}/{config.MAX_SIGNALS_PER_DAY}, pair cooldown OK")
+        return True
     
     def record_signal(self, pair: str):
         """Record that a signal was sent for the given pair."""
@@ -115,7 +113,7 @@ class CooldownManager:
         self._cooldowns[pair].record_signal()
         self._total_signals_today += 1
         
-        logger.info(f"Signal recorded for {pair}. Total today: {self._total_signals_today}")
+        logger.info(f"[COOLDOWN] RECORDED {pair}: total today {self._total_signals_today}/{config.MAX_SIGNALS_PER_DAY}")
     
     def get_stats(self) -> Dict[str, Any]:
         """Get cooldown statistics."""
@@ -124,6 +122,7 @@ class CooldownManager:
             "total_signals_today": self._total_signals_today,
             "max_signals_per_day": config.MAX_SIGNALS_PER_DAY,
             "pairs_tracked": len(self._cooldowns),
+            "last_reset": self._last_reset_datetime.isoformat(),
         }
 
 
