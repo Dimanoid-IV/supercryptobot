@@ -23,8 +23,8 @@ class Config:
     BYBIT_TESTNET: bool = False
     
     # Scanning settings
-    SCAN_INTERVAL_SECONDS: int = 120  # 2 minutes between scans
-    TOP_PAIRS_COUNT: int = 5  # Number of top volatile pairs to analyze
+    SCAN_INTERVAL_SECONDS: int = 90  # Reduced from 120s to 90s for more frequent scans
+    TOP_PAIRS_COUNT: int = 10  # Increased from 5 to 10 pairs to analyze
     
     # Timeframes
     TIMEFRAME_TREND: str = "15"  # 15 minutes for trend detection
@@ -40,7 +40,7 @@ class Config:
     VOLUME_SMA_PERIOD: int = 20
     
     # Scoring thresholds
-    MIN_SIGNAL_SCORE: int = 75  # Minimum score to send signal (out of 100)
+    MIN_SIGNAL_SCORE: int = 65  # Reduced from 75 to allow more signals (out of 100)
     MAX_SCORE: int = 100
     
     # Scoring weights
@@ -52,9 +52,9 @@ class Config:
     SCORE_OI_CONFIRMATION: int = 15
     
     # Signal filters
-    MAX_SIGNALS_PER_DAY: int = 3
-    MIN_HOURS_BETWEEN_SIGNALS_SAME_PAIR: int = 2
-    MAX_CANDLE_ATR_MULTIPLIER: float = 3.0  # Ignore if candle > 3 ATR
+    MAX_SIGNALS_PER_DAY: int = 20  # Increased from 3 to 20 signals per day
+    MIN_HOURS_BETWEEN_SIGNALS_SAME_PAIR: int = 1  # Reduced from 2h to 1h between signals on same pair
+    MAX_CANDLE_ATR_MULTIPLIER: float = 4.0  # Increased from 3.0 to allow more signals
     
     # Funding rate limits (avoid extreme values)
     MAX_FUNDING_RATE: float = 0.001  # 0.1%
