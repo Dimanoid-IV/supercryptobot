@@ -297,6 +297,7 @@ async def run_telegram_app(bot: CryptoSignalBot):
     
     # Add command handlers
     application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("op", start_command))  # Alias for menu
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("on", on_command))
     application.add_handler(CommandHandler("off", off_command))

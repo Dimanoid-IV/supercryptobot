@@ -229,11 +229,13 @@ class TelegramService:
 {status}
 
 <b>Команды:</b>
-• /start - Показать это меню
+• /op - Показать меню управления
 • /status - Текущий статус
 • /on - Включить сигналы
 • /off - Выключить сигналы
-• /schedule - Настроить расписание
+• /schedule_day - День (09:00-21:00)
+• /schedule_night - Ночь (21:00-09:00)
+• /schedule_always - 24/7
 """
             await self.bot.send_message(
                 chat_id=self.chat_id,
