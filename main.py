@@ -3,9 +3,11 @@ Main entry point for Crypto Signal Bot.
 Runs the main event loop for scanning markets and generating signals.
 """
 
-import asyncio
 import sys
 from typing import List
+
+from telegram import Update
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 from config import config
 from utils.helpers import logger, CooldownManager
@@ -46,8 +48,9 @@ class CryptoSignalBot:
         """Start the bot and run main loop."""
         self.is_running = True
         
-        # Send startup message
+        # Send startup message and control menu
         await self.telegram_service.send_test_message()
+        await self.telegram_service.send_control_menu()
         
         logger.info("=" * 50)
         logger.info("Crypto Signal Bot started")
@@ -110,6 +113,12 @@ class CryptoSignalBot:
                 
                 if signal and signal.is_valid:
                     logger.info(f"[SIGNAL] VALID SIGNAL FOUND: {signal.pair} {signal.direction.value} (score: {signal.score})")
+                    
+                    # Check if signals are allowed by schedule
+                    if not self.telegram_service.is_signals_allowed():
+                        logger.info(f"[SIGNAL] Signal blocked by schedule/settings")
+                        continue
+                    
                     # Send signal
                     await self._send_signal(signal)
                     self.cooldown_manager.record_signal(pair.symbol)
@@ -221,12 +230,106 @@ class CryptoSignalBot:
         self.is_running = False
 
 
+# Global bot instance for command handlers
+_bot_instance: Optional[CryptoSignalBot] = None
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /start command."""
+    if _bot_instance:
+        await _bot_instance.telegram_service.send_control_menu()
+
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /status command."""
+    if _bot_instance:
+        status = _bot_instance.telegram_service.get_schedule_status()
+        await update.message.reply_text(status)
+
+async def on_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /on command."""
+    if _bot_instance:
+        _bot_instance.telegram_service.signals_enabled = True
+        await update.message.reply_text("🟢 Сигналы ВКЛЮЧЕНЫ")
+
+async def off_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /off command."""
+    if _bot_instance:
+        _bot_instance.telegram_service.signals_enabled = False
+        await update.message.reply_text("🔴 Сигналы ОТКЛЮЧЕНЫ")
+
+async def schedule_day_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /schedule_day command."""
+    if _bot_instance:
+        from datetime import time
+        _bot_instance.telegram_service.set_schedule(time(9, 0), time(21, 0))
+        await update.message.reply_text("🌅 Расписание: 09:00 - 21:00")
+
+async def schedule_night_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /schedule_night command."""
+    if _bot_instance:
+        from datetime import time
+        _bot_instance.telegram_service.set_schedule(time(21, 0), time(9, 0))
+        await update.message.reply_text("🌙 Расписание: 21:00 - 09:00")
+
+async def schedule_always_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /schedule_always command."""
+    if _bot_instance:
+        _bot_instance.telegram_service.set_schedule(None, None)
+        await update.message.reply_text("⚡ Сигналы активны 24/7")
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle inline keyboard callbacks."""
+    query = update.callback_query
+    await query.answer()
+    
+    if _bot_instance:
+        result = await _bot_instance.telegram_service.handle_callback(query.data)
+        await query.edit_message_text(
+            text=f"{result}\n\nНажмите /start для меню",
+            reply_markup=_bot_instance.telegram_service.get_control_keyboard()
+        )
+
+async def run_telegram_app(bot: CryptoSignalBot):
+    """Run Telegram bot application for command handling."""
+    global _bot_instance
+    _bot_instance = bot
+    
+    application = Application.builder().token(config.TELEGRAM_TOKEN).build()
+    
+    # Add command handlers
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("status", status_command))
+    application.add_handler(CommandHandler("on", on_command))
+    application.add_handler(CommandHandler("off", off_command))
+    application.add_handler(CommandHandler("schedule_day", schedule_day_command))
+    application.add_handler(CommandHandler("schedule_night", schedule_night_command))
+    application.add_handler(CommandHandler("schedule_always", schedule_always_command))
+    application.add_handler(CallbackQueryHandler(button_callback))
+    
+    # Start the bot
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()
+    
+    logger.info("Telegram command handlers started")
+    
+    # Keep running until main bot stops
+    while bot.is_running:
+        await asyncio.sleep(1)
+    
+    await application.updater.stop()
+    await application.stop()
+    await application.shutdown()
+
 async def main():
     """Main entry point."""
     bot = CryptoSignalBot()
     
     try:
-        await bot.start()
+        # Run both the main bot and Telegram command handler
+        await asyncio.gather(
+            bot.start(),
+            run_telegram_app(bot)
+        )
     except Exception as e:
         logger.error(f"Fatal error: {e}")
         sys.exit(1)

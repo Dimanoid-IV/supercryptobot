@@ -3,10 +3,11 @@ Telegram service for sending trading signals.
 Handles all Telegram bot interactions and message formatting.
 """
 
-from typing import Optional
+from typing import Optional, Callable
 from dataclasses import dataclass
+from datetime import datetime, time
 
-from telegram import Bot
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 
 from config import config
@@ -37,7 +38,89 @@ class TelegramService:
         """Initialize Telegram bot."""
         self.bot = Bot(token=config.TELEGRAM_TOKEN)
         self.chat_id = config.TELEGRAM_CHAT_ID
+        
+        # Signal control settings
+        self.signals_enabled = True
+        self.auto_start_time: Optional[time] = None  # e.g., time(9, 0) for 09:00
+        self.auto_stop_time: Optional[time] = None   # e.g., time(21, 0) for 21:00
+        
+        # Callback for settings change
+        self.on_settings_change: Optional[Callable] = None
+        
         logger.info("TelegramService initialized")
+    
+    def is_signals_allowed(self) -> bool:
+        """Check if signals are currently allowed (manual + auto schedule)."""
+        # Manual override disabled
+        if not self.signals_enabled:
+            return False
+        
+        # No auto schedule set - always allowed
+        if self.auto_start_time is None or self.auto_stop_time is None:
+            return True
+        
+        # Check if current time is within allowed window
+        now = datetime.now().time()
+        
+        if self.auto_start_time <= self.auto_stop_time:
+            # Same day window (e.g., 09:00 - 21:00)
+            return self.auto_start_time <= now <= self.auto_stop_time
+        else:
+            # Overnight window (e.g., 21:00 - 09:00)
+            return now >= self.auto_start_time or now <= self.auto_stop_time
+    
+    def get_schedule_status(self) -> str:
+        """Get human-readable schedule status."""
+        if not self.signals_enabled:
+            return "🔴 Сигналы ОТКЛЮЧЕНЫ"
+        
+        if self.auto_start_time is None or self.auto_stop_time is None:
+            return "🟢 Сигналы ВКЛЮЧЕНЫ (без расписания, 24/7)"
+        
+        now = datetime.now().time()
+        is_active = self.is_signals_allowed()
+        
+        status = "🟢" if is_active else "🟡"
+        return f"{status} Расписание: {self.auto_start_time.strftime('%H:%M')} - {self.auto_stop_time.strftime('%H:%M')}"
+    
+    def toggle_signals(self) -> bool:
+        """Toggle signals on/off."""
+        self.signals_enabled = not self.signals_enabled
+        logger.info(f"Signals toggled: {'ON' if self.signals_enabled else 'OFF'}")
+        if self.on_settings_change:
+            self.on_settings_change()
+        return self.signals_enabled
+    
+    def set_schedule(self, start_time: Optional[time], stop_time: Optional[time]):
+        """Set auto schedule for signals."""
+        self.auto_start_time = start_time
+        self.auto_stop_time = stop_time
+        logger.info(f"Schedule set: {start_time} - {stop_time}")
+        if self.on_settings_change:
+            self.on_settings_change()
+    
+    def get_control_keyboard(self) -> InlineKeyboardMarkup:
+        """Get inline keyboard for bot control."""
+        keyboard = [
+            [
+                InlineKeyboardButton("🟢 Включить сигналы" if not self.signals_enabled else "🔴 Выключить сигналы", 
+                                     callback_data="toggle_signals")
+            ],
+            [
+                InlineKeyboardButton("📅 Установить расписание", callback_data="set_schedule")
+            ],
+            [
+                InlineKeyboardButton("🌅 День (09:00-21:00)", callback_data="schedule_day"),
+                InlineKeyboardButton("🌙 Ночь (21:00-09:00)", callback_data="schedule_night")
+            ],
+            [
+                InlineKeyboardButton("⚡ Активно 24/7", callback_data="schedule_always")
+            ],
+            [
+                InlineKeyboardButton("📊 Статус", callback_data="status")
+            ]
+        ]
+        return InlineKeyboardMarkup(keyboard)
     
     def _format_signal_message(self, signal: SignalMessage) -> str:
         """
@@ -135,6 +218,59 @@ class TelegramService:
         except Exception as e:
             logger.error(f"Failed to send test message: {e}")
             return False
+    
+    async def send_control_menu(self) -> bool:
+        """Send control menu with inline keyboard."""
+        try:
+            status = self.get_schedule_status()
+            message = f"""
+🤖 <b>Управление Crypto Signal Bot</b>
+
+{status}
+
+<b>Команды:</b>
+• /start - Показать это меню
+• /status - Текущий статус
+• /on - Включить сигналы
+• /off - Выключить сигналы
+• /schedule - Настроить расписание
+"""
+            await self.bot.send_message(
+                chat_id=self.chat_id,
+                text=message,
+                parse_mode=ParseMode.HTML,
+                reply_markup=self.get_control_keyboard()
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send control menu: {e}")
+            return False
+    
+    async def handle_callback(self, callback_data: str) -> str:
+        """Handle callback from inline keyboard."""
+        if callback_data == "toggle_signals":
+            new_state = self.toggle_signals()
+            return f"Сигналы {'ВКЛЮЧЕНЫ' if new_state else 'ОТКЛЮЧЕНЫ'}"
+        
+        elif callback_data == "schedule_day":
+            self.set_schedule(time(9, 0), time(21, 0))
+            return "Расписание установлено: 09:00 - 21:00 (дневное)"
+        
+        elif callback_data == "schedule_night":
+            self.set_schedule(time(21, 0), time(9, 0))
+            return "Расписание установлено: 21:00 - 09:00 (ночное)"
+        
+        elif callback_data == "schedule_always":
+            self.set_schedule(None, None)
+            return "Расписание отключено. Сигналы активны 24/7"
+        
+        elif callback_data == "status":
+            return self.get_schedule_status()
+        
+        elif callback_data == "set_schedule":
+            return "Используйте команды:\n/schedule_day - 09:00-21:00\n/schedule_night - 21:00-09:00\n/schedule_always - 24/7"
+        
+        return "Неизвестная команда"
     
     async def send_status_update(self, message: str) -> bool:
         """
