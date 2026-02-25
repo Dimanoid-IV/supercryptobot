@@ -3,6 +3,7 @@ Main entry point for Crypto Signal Bot.
 Runs the main event loop for scanning markets and generating signals.
 """
 
+import asyncio
 import sys
 from typing import List
 
