@@ -40,7 +40,7 @@ class Config:
     VOLUME_SMA_PERIOD: int = 20
     
     # Scoring thresholds
-    MIN_SIGNAL_SCORE: int = 65  # Reduced from 75 to allow more signals (out of 100)
+    MIN_SIGNAL_SCORE: int = 75  # Minimum confidence 75% for signals (out of 100)
     MAX_SCORE: int = 100
     
     # Scoring weights
@@ -52,8 +52,8 @@ class Config:
     SCORE_OI_CONFIRMATION: int = 15
     
     # Signal filters
-    MAX_SIGNALS_PER_DAY: int = 20  # Increased from 3 to 20 signals per day
-    MIN_HOURS_BETWEEN_SIGNALS_SAME_PAIR: int = 1  # Reduced from 2h to 1h between signals on same pair
+    MAX_SIGNALS_PER_DAY: int = 1000  # Unlimited signals (high limit for continuous flow)
+    MIN_HOURS_BETWEEN_SIGNALS_SAME_PAIR: int = 0  # No cooldown between signals on same pair
     MAX_CANDLE_ATR_MULTIPLIER: float = 4.0  # Increased from 3.0 to allow more signals
     
     # Funding rate limits (avoid extreme values)
