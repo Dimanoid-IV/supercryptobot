@@ -236,7 +236,13 @@ _bot_instance: Optional[CryptoSignalBot] = None
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command."""
-    if _bot_instance:
+    # Register username for future reference
+    if _bot_instance and update.effective_user:
+        username = update.effective_user.username
+        chat_id = str(update.effective_chat.id)
+        if username:
+            _bot_instance.telegram_service.register_username(username, chat_id)
+        
         await _bot_instance.telegram_service.send_control_menu()
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -280,7 +286,7 @@ async def schedule_always_command(update: Update, context: ContextTypes.DEFAULT_
 async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /add_user command - add new subscriber (admin only).
     
-    Usage: /add_user <chat_id> [period]
+    Usage: /add_user <chat_id|@username> [period]
     Periods: 2 (trial), 30 (1 month), 90 (3 months), 180 (6 months)
     """
     if not _bot_instance:
@@ -293,17 +299,19 @@ async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if not context.args:
         await update.message.reply_text(
-            "Использование: /add_user <chat_id> [период]\n\n"
+            "Использование: /add_user <chat_id|@username> [период]\n\n"
             "Периоды:\n"
             "• 2 - 2 дня (пробный)\n"
             "• 30 - 1 месяц\n"
             "• 90 - 3 месяца\n"
             "• 180 - 6 месяцев\n\n"
-            "Пример: /add_user 123456789 30"
+            "Примеры:\n"
+            "/add_user 123456789 30\n"
+            "/add_user @username 30"
         )
         return
     
-    chat_id = context.args[0]
+    user_input = context.args[0]
     
     # Get period (default 2 days for trial)
     days = 2
@@ -318,41 +326,41 @@ async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
     
     service = _bot_instance.telegram_service
-    is_new = chat_id not in service.subscribers
     
-    if service.add_subscriber(chat_id, days):
+    # Add subscriber (handles both chat_id and @username)
+    success, message = service.add_subscriber(user_input, days)
+    
+    if success:
+        # Resolve to actual chat_id for notification
+        if user_input.startswith('@'):
+            chat_id = service.resolve_username(user_input)
+        else:
+            chat_id = user_input
+        
         settings = service.get_user_settings(chat_id)
-        days_remaining = settings.get_days_remaining()
         period_name = service._get_period_name(days)
         
-        if is_new:
-            await update.message.reply_text(
-                f"✅ Пользователь {chat_id} добавлен\n"
-                f"📅 Период: {period_name}\n"
-                f"⏳ Действует до: {settings.subscription_expiry[:10]}"
-            )
-        else:
-            await update.message.reply_text(
-                f"🔄 Подписка обновлена для {chat_id}\n"
-                f"📅 Период: {period_name}\n"
-                f"⏳ Действует до: {settings.subscription_expiry[:10]}"
-            )
+        await update.message.reply_text(
+            f"✅ {message}\n"
+            f"⏳ Действует до: {settings.subscription_expiry[:10]}"
+        )
         
         # Notify user
-        try:
-            await service.bot.send_message(
-                chat_id=chat_id,
-                text=f"🎉 Добро пожаловать!\n\n"
-                     f"Вам предоставлен доступ к сигналам на {period_name}.\n"
-                     f"⏳ Подписка действует до: {settings.subscription_expiry[:10]}\n\n"
-                     f"Используйте /mysettings для настройки\n"
-                     f"и /toggle для включения сигналов.",
-                parse_mode='HTML'
-            )
-        except Exception as e:
-            logger.error(f"Failed to notify new user {chat_id}: {e}")
+        if chat_id:
+            try:
+                await service.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"🎉 Добро пожаловать!\n\n"
+                         f"Вам предоставлен доступ к сигналам на {period_name}.\n"
+                         f"⏳ Подписка действует до: {settings.subscription_expiry[:10]}\n\n"
+                         f"Используйте /mysettings для настройки\n"
+                         f"и /toggle для включения сигналов.",
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify new user {chat_id}: {e}")
     else:
-        await update.message.reply_text(f"❌ Ошибка при добавлении пользователя {chat_id}")
+        await update.message.reply_text(f"❌ {message}")
 
 async def remove_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /remove_user command - remove subscriber (admin only)."""
@@ -422,12 +430,25 @@ async def extend_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if len(context.args) < 2:
         await update.message.reply_text(
-            "Использование: /extend <chat_id> <дни>\n\n"
-            "Пример: /extend 123456789 30"
+            "Использование: /extend <chat_id|@username> <дни>\n\n"
+            "Примеры:\n"
+            "/extend 123456789 30\n"
+            "/extend @username 30"
         )
         return
     
-    chat_id = context.args[0]
+    user_input = context.args[0]
+    
+    # Resolve username if provided
+    service = _bot_instance.telegram_service
+    if user_input.startswith('@'):
+        chat_id = service.resolve_username(user_input)
+        if not chat_id:
+            await update.message.reply_text(f"❌ Пользователь {user_input} не найден. Сначала попросите его написать боту.")
+            return
+    else:
+        chat_id = user_input
+    
     try:
         days = int(context.args[1])
         if days not in [2, 30, 90, 180]:
@@ -437,16 +458,15 @@ async def extend_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Дни должны быть числом")
         return
     
-    service = _bot_instance.telegram_service
     if chat_id not in service.subscribers:
-        await update.message.reply_text(f"❌ Пользователь {chat_id} не найден")
+        await update.message.reply_text(f"❌ Пользователь {user_input} не найден в подписчиках")
         return
     
     if service.extend_subscription(chat_id, days):
         settings = service.get_user_settings(chat_id)
         period_name = service._get_period_name(days)
         await update.message.reply_text(
-            f"✅ Подписка продлена для {chat_id}\n"
+            f"✅ Подписка продлена для {user_input}\n"
             f"📅 Добавлено: {period_name}\n"
             f"⏳ Новый срок: {settings.subscription_expiry[:10]}"
         )

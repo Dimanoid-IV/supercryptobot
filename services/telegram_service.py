@@ -141,6 +141,9 @@ class TelegramService:
         # Load per-user settings
         self.user_settings: dict[str, UserSettings] = self._load_user_settings()
         
+        # Username to chat_id mapping (for adding users by @username)
+        self.username_to_chat_id: dict[str, str] = self._load_username_mapping()
+        
         # Signal control settings (admin/global)
         self.signals_enabled = True
         self.auto_start_time: Optional[time] = None  # e.g., time(9, 0) for 09:00
@@ -150,6 +153,45 @@ class TelegramService:
         self.on_settings_change: Optional[Callable] = None
         
         logger.info(f"TelegramService initialized with {len(self.subscribers)} subscribers")
+    
+    def _load_username_mapping(self) -> dict[str, str]:
+        """Load username to chat_id mapping from file."""
+        if os.path.exists(self.subscribers_file):
+            try:
+                with open(self.subscribers_file, 'r') as f:
+                    data = json.load(f)
+                    return data.get('username_mapping', {})
+            except Exception as e:
+                logger.error(f"Failed to load username mapping: {e}")
+        return {}
+    
+    def _save_username_mapping(self):
+        """Save username to chat_id mapping to file."""
+        try:
+            data = {}
+            if os.path.exists(self.subscribers_file):
+                with open(self.subscribers_file, 'r') as f:
+                    data = json.load(f)
+            
+            data['username_mapping'] = self.username_to_chat_id
+            
+            with open(self.subscribers_file, 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logger.error(f"Failed to save username mapping: {e}")
+    
+    def register_username(self, username: str, chat_id: str):
+        """Register username to chat_id mapping when user interacts with bot."""
+        if username:
+            username_clean = username.lstrip('@').lower()
+            self.username_to_chat_id[username_clean] = str(chat_id)
+            self._save_username_mapping()
+            logger.info(f"Registered username @{username_clean} -> {chat_id}")
+    
+    def resolve_username(self, username: str) -> Optional[str]:
+        """Resolve @username to chat_id."""
+        username_clean = username.lstrip('@').lower()
+        return self.username_to_chat_id.get(username_clean)
     
     def _load_subscribers(self) -> List[str]:
         """Load subscriber chat IDs from file."""
@@ -209,14 +251,25 @@ class TelegramService:
         logger.info(f"Updated settings for user {chat_id_str}: {kwargs}")
         return True
     
-    def add_subscriber(self, chat_id: str, days: int = 2) -> bool:
+    def add_subscriber(self, chat_id: str, days: int = 2) -> tuple[bool, str]:
         """Add a new subscriber with subscription period.
         
         Args:
-            chat_id: User's chat ID
+            chat_id: User's chat ID or @username
             days: Subscription duration in days (default 2 for trial)
+            
+        Returns:
+            Tuple of (success: bool, message: str)
         """
         from datetime import timedelta
+        
+        # Resolve username if provided
+        original_input = chat_id
+        if chat_id.startswith('@'):
+            resolved = self.resolve_username(chat_id)
+            if not resolved:
+                return False, f"Пользователь {chat_id} не найден. Сначала попросите его написать боту."
+            chat_id = resolved
         
         chat_id_str = str(chat_id)
         is_new = chat_id_str not in self.subscribers
@@ -240,9 +293,10 @@ class TelegramService:
         period_name = self._get_period_name(days)
         if is_new:
             logger.info(f"New subscriber added: {chat_id_str} for {period_name}")
+            return True, f"Пользователь {original_input} добавлен на {period_name}"
         else:
             logger.info(f"Subscriber {chat_id_str} subscription updated to {period_name}")
-        return True
+            return True, f"Подписка обновлена для {original_input} на {period_name}"
     
     def _get_period_name(self, days: int) -> str:
         """Get human-readable period name."""
