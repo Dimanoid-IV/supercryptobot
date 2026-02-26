@@ -242,12 +242,84 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    if _bot_instance:
-        result = await _bot_instance.telegram_service.handle_callback(query.data)
+    if not _bot_instance:
+        return
+    
+    callback_data = query.data
+    
+    # Handle new user callbacks
+    if callback_data == "request_trial":
         await query.edit_message_text(
-            text=f"{result}\n\nНажмите /start для меню",
-            reply_markup=_bot_instance.telegram_service.get_control_keyboard()
+            text="✅ <b>Запрос отправлен!</b>\n\n"
+                 "Администратор скоро активирует ваш пробный период.\n"
+                 "Вы получите уведомление когда всё будет готово.\n\n"
+                 "Обычно это занимает несколько минут.",
+            parse_mode='HTML'
         )
+        
+        # Notify admin about trial request
+        user = update.effective_user
+        chat_id = str(update.effective_chat.id)
+        try:
+            admin_msg = f"""⏰ <b>Запрос на пробный период!</b>
+
+👤 Имя: {user.first_name if user else 'N/A'}
+🔹 Username: @{user.username if user and user.username else 'N/A'}
+🆔 Chat ID: <code>{chat_id}</code>
+
+Быстрое добавление:
+<code>/add_user {chat_id} 2</code>
+"""
+            await _bot_instance.telegram_service.bot.send_message(
+                chat_id=_bot_instance.telegram_service.chat_id,
+                text=admin_msg,
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify admin about trial request: {e}")
+        return
+    
+    if callback_data == "about_signals":
+        about_text = """📊 <b>О наших сигналах:</b>
+
+<b>Анализируем:</b>
+• Тренд на 15-минутном таймфрейме
+• Точку входа на 5-минутном
+• Объемы торгов (Volume Spike)
+• Open Interest изменения
+• Funding Rate
+• ATR для расчета стоп-лосса
+
+<b>Каждый сигнал содержит:</b>
+• Направление (LONG/SHORT)
+• Точку входа
+• Stop Loss
+• Take Profit
+• Risk/Reward ratio
+• Confidence score (75%+)
+
+<b>Пример сигнала:</b>
+<code>BTCUSDT — LONG
+Entry: 43250.00
+SL: 42800.00
+TP: 44100.00
+R/R: 1:2.5
+Confidence: 82%</code>
+
+Нажмите /start чтобы запросить пробный период!
+"""
+        await query.edit_message_text(
+            text=about_text,
+            parse_mode='HTML'
+        )
+        return
+    
+    # Handle existing control menu callbacks
+    result = await _bot_instance.telegram_service.handle_callback(callback_data)
+    await query.edit_message_text(
+        text=f"{result}\n\nНажмите /start для меню",
+        reply_markup=_bot_instance.telegram_service.get_control_keyboard()
+    )
 
 
 def setup_command_handlers(bot_instance: CryptoSignalBot):

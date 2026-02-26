@@ -3,8 +3,10 @@ User command handlers for Crypto Signal Bot.
 Handles user settings and preferences.
 """
 
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+
+from utils.helpers import logger
 
 
 # Global bot instance reference (set from main.py)
@@ -18,15 +20,85 @@ def set_bot_instance(bot):
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start command."""
+    """Handle /start command with welcome message and trial offer."""
+    if not _bot_instance:
+        return
+    
+    user = update.effective_user
+    chat_id = str(update.effective_chat.id)
+    
     # Register username for future reference
-    if _bot_instance and update.effective_user:
-        username = update.effective_user.username
-        chat_id = str(update.effective_chat.id)
-        if username:
-            _bot_instance.telegram_service.register_username(username, chat_id)
+    if user and user.username:
+        _bot_instance.telegram_service.register_username(user.username, chat_id)
+        logger.info(f"New user started bot: @{user.username} ({chat_id})")
+    else:
+        logger.info(f"New user started bot: {chat_id} (no username)")
+    
+    # Check if user already has subscription
+    service = _bot_instance.telegram_service
+    is_subscribed = chat_id in service.subscribers
+    
+    if is_subscribed:
+        # Existing subscriber - show control menu
+        await service.send_control_menu()
+    else:
+        # New user - show welcome message with trial offer
+        welcome_text = f"""🎉 <b>Добро пожаловать в Crypto Signal Bot!</b>
+
+Привет, {user.first_name if user else 'друг'}!
+
+Я отправляю торговые сигналы на основе технического анализа:
+• Трендовые линии и EMA
+• Объемы и волатильность
+• Open Interest и Funding Rate
+• Risk/Reward минимум 1:2
+
+<b>🎁 Пробный период: 2 дня БЕСПЛАТНО</b>
+
+Чтобы получить доступ:
+1. Нажмите кнопку ниже
+2. Администратор активирует вашу подписку
+3. Начните получать сигналы!
+
+<i>После пробного периода доступны подписки:
+• 1 месяц
+• 3 месяца  
+• 6 месяцев</i>
+"""
         
-        await _bot_instance.telegram_service.send_control_menu()
+        # Create keyboard with request button
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🚀 Запросить пробный период", callback_data="request_trial")],
+            [InlineKeyboardButton("📊 Подробнее о сигналах", callback_data="about_signals")],
+            [InlineKeyboardButton("💬 Связаться с поддержкой", url="https://t.me/your_support_username")]
+        ])
+        
+        await update.message.reply_text(
+            welcome_text,
+            parse_mode='HTML',
+            reply_markup=keyboard
+        )
+        
+        # Notify admin about new user
+        try:
+            admin_msg = f"""📢 <b>Новый пользователь!</b>
+
+👤 Имя: {user.first_name if user else 'N/A'}
+🔹 Username: @{user.username if user and user.username else 'N/A'}
+🆔 Chat ID: <code>{chat_id}</code>
+
+Источник: {context.args[0] if context.args else 'прямой заход'}
+
+Добавить пробный период:
+<code>/add_user {chat_id} 2</code>
+"""
+            await service.bot.send_message(
+                chat_id=service.chat_id,
+                text=admin_msg,
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify admin about new user: {e}")
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
