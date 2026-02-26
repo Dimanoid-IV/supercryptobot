@@ -42,6 +42,8 @@ class UserSettings:
     schedule_start: Optional[str] = None  # "09:00" format or None for 24/7
     schedule_end: Optional[str] = None    # "21:00" format or None for 24/7
     max_signals_per_day: int = 1000  # Default high limit
+    subscription_expiry: Optional[str] = None  # ISO format date or None
+    added_date: Optional[str] = None  # ISO format date when user was added
     
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -51,7 +53,9 @@ class UserSettings:
             'min_confidence': self.min_confidence,
             'schedule_start': self.schedule_start,
             'schedule_end': self.schedule_end,
-            'max_signals_per_day': self.max_signals_per_day
+            'max_signals_per_day': self.max_signals_per_day,
+            'subscription_expiry': self.subscription_expiry,
+            'added_date': self.added_date
         }
     
     @classmethod
@@ -63,13 +67,24 @@ class UserSettings:
             min_confidence=data.get('min_confidence', 75),
             schedule_start=data.get('schedule_start'),
             schedule_end=data.get('schedule_end'),
-            max_signals_per_day=data.get('max_signals_per_day', 1000)
+            max_signals_per_day=data.get('max_signals_per_day', 1000),
+            subscription_expiry=data.get('subscription_expiry'),
+            added_date=data.get('added_date')
         )
     
     def is_signals_allowed_now(self) -> bool:
         """Check if signals are allowed based on schedule and enabled status."""
         if not self.signals_enabled:
             return False
+        
+        # Check subscription expiry
+        if self.subscription_expiry:
+            try:
+                expiry = datetime.fromisoformat(self.subscription_expiry)
+                if datetime.now() > expiry:
+                    return False  # Subscription expired
+            except Exception:
+                pass
         
         # No schedule set - always allowed
         if self.schedule_start is None or self.schedule_end is None:
@@ -88,6 +103,27 @@ class UserSettings:
                 return now >= start_time or now <= end_time
         except Exception:
             return True  # Allow on error
+    
+    def get_days_remaining(self) -> Optional[int]:
+        """Get number of days remaining in subscription."""
+        if not self.subscription_expiry:
+            return None
+        try:
+            expiry = datetime.fromisoformat(self.subscription_expiry)
+            remaining = expiry - datetime.now()
+            return max(0, remaining.days)
+        except Exception:
+            return None
+    
+    def is_expired(self) -> bool:
+        """Check if subscription has expired."""
+        if not self.subscription_expiry:
+            return False
+        try:
+            expiry = datetime.fromisoformat(self.subscription_expiry)
+            return datetime.now() > expiry
+        except Exception:
+            return False
 
 
 class TelegramService:
@@ -173,21 +209,211 @@ class TelegramService:
         logger.info(f"Updated settings for user {chat_id_str}: {kwargs}")
         return True
     
-    def add_subscriber(self, chat_id: str) -> bool:
-        """Add a new subscriber."""
+    def add_subscriber(self, chat_id: str, days: int = 2) -> bool:
+        """Add a new subscriber with subscription period.
+        
+        Args:
+            chat_id: User's chat ID
+            days: Subscription duration in days (default 2 for trial)
+        """
+        from datetime import timedelta
+        
+        chat_id_str = str(chat_id)
+        is_new = chat_id_str not in self.subscribers
+        
+        if is_new:
+            self.subscribers.append(chat_id_str)
+        
+        # Calculate expiry date
+        added_date = datetime.now()
+        expiry_date = added_date + timedelta(days=days)
+        
+        # Get or create user settings
+        settings = self.get_user_settings(chat_id_str)
+        settings.added_date = added_date.isoformat()
+        settings.subscription_expiry = expiry_date.isoformat()
+        settings.signals_enabled = True
+        
+        self.user_settings[chat_id_str] = settings
+        self._save_subscribers()
+        
+        period_name = self._get_period_name(days)
+        if is_new:
+            logger.info(f"New subscriber added: {chat_id_str} for {period_name}")
+        else:
+            logger.info(f"Subscriber {chat_id_str} subscription updated to {period_name}")
+        return True
+    
+    def _get_period_name(self, days: int) -> str:
+        """Get human-readable period name."""
+        if days == 2:
+            return "2 дня (пробный период)"
+        elif days == 30:
+            return "1 месяц"
+        elif days == 90:
+            return "3 месяца"
+        elif days == 180:
+            return "6 месяцев"
+        else:
+            return f"{days} дней"
+    
+    def extend_subscription(self, chat_id: str, days: int) -> bool:
+        """Extend subscriber's subscription."""
+        from datetime import timedelta
+        
         chat_id_str = str(chat_id)
         if chat_id_str not in self.subscribers:
-            self.subscribers.append(chat_id_str)
+            return False
+        
+        settings = self.get_user_settings(chat_id_str)
+        
+        # If already has expiry, extend from that date, otherwise from now
+        if settings.subscription_expiry and not settings.is_expired():
+            current_expiry = datetime.fromisoformat(settings.subscription_expiry)
+            new_expiry = current_expiry + timedelta(days=days)
+        else:
+            new_expiry = datetime.now() + timedelta(days=days)
+        
+        settings.subscription_expiry = new_expiry.isoformat()
+        settings.signals_enabled = True
+        self.user_settings[chat_id_str] = settings
+        self._save_subscribers()
+        
+        logger.info(f"Extended subscription for {chat_id_str} by {days} days")
+        return True
+    
+    def get_expired_subscribers(self) -> list[str]:
+        """Get list of expired subscribers."""
+        expired = []
+        for chat_id in self.subscribers:
+            settings = self.get_user_settings(chat_id)
+            if settings.is_expired():
+                expired.append(chat_id)
+        return expired
+    
+    def remove_expired_subscribers(self) -> list[str]:
+        """Remove expired subscribers and return their chat_ids."""
+        expired = self.get_expired_subscribers()
+        for chat_id in expired:
+            self.subscribers.remove(chat_id)
+            if chat_id in self.user_settings:
+                del self.user_settings[chat_id]
+            logger.info(f"Removed expired subscriber: {chat_id}")
+        
+        if expired:
             self._save_subscribers()
-            logger.info(f"New subscriber added: {chat_id_str}")
-            return True
-        return False
+        return expired
+    
+    async def check_expiring_subscriptions(self, days_before: int = 3) -> tuple[list[str], list[str]]:
+        """Check for subscriptions expiring soon and already expired.
+        
+        Returns:
+            Tuple of (expiring_soon_list, just_expired_list)
+        """
+        from datetime import timedelta
+        
+        expiring_soon = []
+        just_expired = []
+        now = datetime.now()
+        
+        for chat_id in list(self.subscribers):
+            settings = self.get_user_settings(chat_id)
+            if not settings.subscription_expiry:
+                continue
+            
+            try:
+                expiry = datetime.fromisoformat(settings.subscription_expiry)
+                days_until = (expiry - now).days
+                
+                # Just expired (within last 24 hours)
+                if days_until < 0 and days_until >= -1:
+                    just_expired.append(chat_id)
+                # Expiring soon
+                elif 0 <= days_until <= days_before:
+                    expiring_soon.append((chat_id, days_until))
+                    
+            except Exception as e:
+                logger.error(f"Error checking expiry for {chat_id}: {e}")
+        
+        return expiring_soon, just_expired
+    
+    async def notify_expiring_users(self, expiring_soon: list[tuple[str, int]]):
+        """Send expiry warning notifications to users."""
+        for chat_id, days_left in expiring_soon:
+            try:
+                if days_left == 0:
+                    message = (
+                        "⏰ <b>Ваша подписка истекает сегодня!</b>\n\n"
+                        "Чтобы продолжить получать сигналы, свяжитесь с администратором "
+                        "для продления подписки.\n\n"
+                        "Используйте /mysettings для проверки статуса."
+                    )
+                else:
+                    message = (
+                        f"⏰ <b>Ваша подписка истекает через {days_left} дн.!</b>\n\n"
+                        f"Не забудьте продлить подписку, чтобы продолжить получать сигналы.\n\n"
+                        f"Свяжитесь с администратором для продления."
+                    )
+                
+                await self.bot.send_message(
+                    chat_id=chat_id,
+                    text=message,
+                    parse_mode=ParseMode.HTML
+                )
+                logger.info(f"Sent expiry warning to {chat_id} ({days_left} days left)")
+            except Exception as e:
+                logger.error(f"Failed to notify expiring user {chat_id}: {e}")
+    
+    async def notify_expired_users(self, expired: list[str]):
+        """Send expiry notification to users whose subscription just expired."""
+        for chat_id in expired:
+            try:
+                await self.bot.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        "🔴 <b>Ваша подписка истекла</b>\n\n"
+                        "Вы больше не будете получать сигналы.\n\n"
+                        "Чтобы возобновить подписку, свяжитесь с администратором.\n\n"
+                        "Спасибо за использование нашего бота! 🙏"
+                    ),
+                    parse_mode=ParseMode.HTML
+                )
+                logger.info(f"Sent expiry notification to {chat_id}")
+            except Exception as e:
+                logger.error(f"Failed to notify expired user {chat_id}: {e}")
+    
+    async def notify_admin_about_expired(self, expired: list[str], expiring_soon: list[tuple[str, int]]):
+        """Notify admin about expired and expiring subscriptions."""
+        if not self.chat_id:
+            return
+        
+        messages = []
+        
+        if expired:
+            expired_list = "\n".join([f"• {uid}" for uid in expired])
+            messages.append(f"🔴 <b>Истекли подписки ({len(expired)}):</b>\n{expired_list}")
+        
+        if expiring_soon:
+            expiring_list = "\n".join([f"• {uid} ({days} дн.)" for uid, days in expiring_soon])
+            messages.append(f"🟡 <b>Истекают скоро ({len(expiring_soon)}):</b>\n{expiring_list}")
+        
+        if messages:
+            try:
+                await self.bot.send_message(
+                    chat_id=self.chat_id,
+                    text="📊 <b>Отчет по подпискам:</b>\n\n" + "\n\n".join(messages),
+                    parse_mode=ParseMode.HTML
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify admin about expirations: {e}")
     
     def remove_subscriber(self, chat_id: str) -> bool:
         """Remove a subscriber."""
         chat_id_str = str(chat_id)
         if chat_id_str in self.subscribers:
             self.subscribers.remove(chat_id_str)
+            if chat_id_str in self.user_settings:
+                del self.user_settings[chat_id_str]
             self._save_subscribers()
             logger.info(f"Subscriber removed: {chat_id_str}")
             return True

@@ -278,7 +278,11 @@ async def schedule_always_command(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text("⚡ Сигналы активны 24/7")
 
 async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /add_user command - add new subscriber (admin only)."""
+    """Handle /add_user command - add new subscriber (admin only).
+    
+    Usage: /add_user <chat_id> [period]
+    Periods: 2 (trial), 30 (1 month), 90 (3 months), 180 (6 months)
+    """
     if not _bot_instance:
         return
     
@@ -288,14 +292,67 @@ async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if not context.args:
-        await update.message.reply_text("Использование: /add_user <chat_id>")
+        await update.message.reply_text(
+            "Использование: /add_user <chat_id> [период]\n\n"
+            "Периоды:\n"
+            "• 2 - 2 дня (пробный)\n"
+            "• 30 - 1 месяц\n"
+            "• 90 - 3 месяца\n"
+            "• 180 - 6 месяцев\n\n"
+            "Пример: /add_user 123456789 30"
+        )
         return
     
     chat_id = context.args[0]
-    if _bot_instance.telegram_service.add_subscriber(chat_id):
-        await update.message.reply_text(f"✅ Пользователь {chat_id} добавлен")
+    
+    # Get period (default 2 days for trial)
+    days = 2
+    if len(context.args) >= 2:
+        try:
+            days = int(context.args[1])
+            if days not in [2, 30, 90, 180]:
+                await update.message.reply_text("❌ Неверный период. Используйте: 2, 30, 90 или 180")
+                return
+        except ValueError:
+            await update.message.reply_text("❌ Период должен быть числом: 2, 30, 90 или 180")
+            return
+    
+    service = _bot_instance.telegram_service
+    is_new = chat_id not in service.subscribers
+    
+    if service.add_subscriber(chat_id, days):
+        settings = service.get_user_settings(chat_id)
+        days_remaining = settings.get_days_remaining()
+        period_name = service._get_period_name(days)
+        
+        if is_new:
+            await update.message.reply_text(
+                f"✅ Пользователь {chat_id} добавлен\n"
+                f"📅 Период: {period_name}\n"
+                f"⏳ Действует до: {settings.subscription_expiry[:10]}"
+            )
+        else:
+            await update.message.reply_text(
+                f"🔄 Подписка обновлена для {chat_id}\n"
+                f"📅 Период: {period_name}\n"
+                f"⏳ Действует до: {settings.subscription_expiry[:10]}"
+            )
+        
+        # Notify user
+        try:
+            await service.bot.send_message(
+                chat_id=chat_id,
+                text=f"🎉 Добро пожаловать!\n\n"
+                     f"Вам предоставлен доступ к сигналам на {period_name}.\n"
+                     f"⏳ Подписка действует до: {settings.subscription_expiry[:10]}\n\n"
+                     f"Используйте /mysettings для настройки\n"
+                     f"и /toggle для включения сигналов.",
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify new user {chat_id}: {e}")
     else:
-        await update.message.reply_text(f"ℹ️ Пользователь {chat_id} уже в списке")
+        await update.message.reply_text(f"❌ Ошибка при добавлении пользователя {chat_id}")
 
 async def remove_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /remove_user command - remove subscriber (admin only)."""
@@ -318,7 +375,7 @@ async def remove_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(f"ℹ️ Пользователь {chat_id} не найден")
 
 async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /list_users command - list all subscribers (admin only)."""
+    """Handle /list_users command - list all subscribers with expiry info (admin only)."""
     if not _bot_instance:
         return
     
@@ -327,14 +384,127 @@ async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("⛔ У вас нет прав для этой команды")
         return
     
-    subscribers = _bot_instance.telegram_service.subscribers
+    service = _bot_instance.telegram_service
+    subscribers = service.subscribers
     count = len(subscribers)
     
     if count == 0:
         await update.message.reply_text("📋 Список подписчиков пуст")
     else:
-        users_list = "\n".join([f"• {uid}" for uid in subscribers])
+        lines = []
+        for uid in subscribers:
+            settings = service.get_user_settings(uid)
+            days_left = settings.get_days_remaining()
+            if days_left is not None:
+                if days_left == 0:
+                    status = "🔴 истекает сегодня"
+                elif days_left <= 3:
+                    status = f"🟡 {days_left} дн."
+                else:
+                    status = f"🟢 {days_left} дн."
+                expiry = settings.subscription_expiry[:10] if settings.subscription_expiry else "?"
+                lines.append(f"• {uid} | {status} | до {expiry}")
+            else:
+                lines.append(f"• {uid} | ⚪ без срока")
+        
+        users_list = "\n".join(lines)
         await update.message.reply_text(f"📋 Подписчики ({count}):\n{users_list}")
+
+async def extend_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /extend command - extend subscription (admin only)."""
+    if not _bot_instance:
+        return
+    
+    # Only admin can extend
+    if str(update.effective_chat.id) != str(_bot_instance.telegram_service.chat_id):
+        await update.message.reply_text("⛔ У вас нет прав для этой команды")
+        return
+    
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "Использование: /extend <chat_id> <дни>\n\n"
+            "Пример: /extend 123456789 30"
+        )
+        return
+    
+    chat_id = context.args[0]
+    try:
+        days = int(context.args[1])
+        if days not in [2, 30, 90, 180]:
+            await update.message.reply_text("❌ Неверный период. Используйте: 2, 30, 90 или 180")
+            return
+    except ValueError:
+        await update.message.reply_text("❌ Дни должны быть числом")
+        return
+    
+    service = _bot_instance.telegram_service
+    if chat_id not in service.subscribers:
+        await update.message.reply_text(f"❌ Пользователь {chat_id} не найден")
+        return
+    
+    if service.extend_subscription(chat_id, days):
+        settings = service.get_user_settings(chat_id)
+        period_name = service._get_period_name(days)
+        await update.message.reply_text(
+            f"✅ Подписка продлена для {chat_id}\n"
+            f"📅 Добавлено: {period_name}\n"
+            f"⏳ Новый срок: {settings.subscription_expiry[:10]}"
+        )
+        
+        # Notify user
+        try:
+            await service.bot.send_message(
+                chat_id=chat_id,
+                text=f"🔄 Ваша подписка продлена!\n\n"
+                     f"📅 Добавлено: {period_name}\n"
+                     f"⏳ Новый срок: {settings.subscription_expiry[:10]}\n\n"
+                     f"Спасибо за продолжение работы с нами! 🚀",
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify user {chat_id} about extension: {e}")
+    else:
+        await update.message.reply_text(f"❌ Ошибка при продлении подписки")
+
+async def user_info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /user_info command - show detailed user info (admin only)."""
+    if not _bot_instance:
+        return
+    
+    # Only admin can view user info
+    if str(update.effective_chat.id) != str(_bot_instance.telegram_service.chat_id):
+        await update.message.reply_text("⛔ У вас нет прав для этой команды")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Использование: /user_info <chat_id>")
+        return
+    
+    chat_id = context.args[0]
+    service = _bot_instance.telegram_service
+    
+    if chat_id not in service.subscribers:
+        await update.message.reply_text(f"❌ Пользователь {chat_id} не найден")
+        return
+    
+    settings = service.get_user_settings(chat_id)
+    days_left = settings.get_days_remaining()
+    
+    status = "🟢 Активен" if settings.signals_enabled else "🔴 Отключен"
+    schedule = f"{settings.schedule_start}-{settings.schedule_end}" if settings.schedule_start else "24/7"
+    
+    message = f"""👤 <b>Пользователь:</b> <code>{chat_id}</code>
+
+📊 <b>Статус:</b> {status}
+🎯 <b>Min confidence:</b> {settings.min_confidence}%
+📅 <b>Расписание:</b> {schedule}
+
+⏳ <b>Подписка:</b>
+• Добавлен: {settings.added_date[:10] if settings.added_date else '?'}
+• Истекает: {settings.subscription_expiry[:10] if settings.subscription_expiry else '?'}
+• Осталось: {days_left if days_left is not None else '?'} дней
+"""
+    await update.message.reply_text(message, parse_mode='HTML')
 
 async def mysettings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /mysettings command - show user their settings."""
@@ -460,6 +630,8 @@ async def run_telegram_app(bot: CryptoSignalBot):
     application.add_handler(CommandHandler("add_user", add_user_command))
     application.add_handler(CommandHandler("remove_user", remove_user_command))
     application.add_handler(CommandHandler("list_users", list_users_command))
+    application.add_handler(CommandHandler("extend", extend_command))
+    application.add_handler(CommandHandler("user_info", user_info_command))
     # User settings commands
     application.add_handler(CommandHandler("mysettings", mysettings_command))
     application.add_handler(CommandHandler("toggle", toggle_command))
