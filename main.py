@@ -5,7 +5,7 @@ Runs the main event loop for scanning markets and generating signals.
 
 import asyncio
 import sys
-from typing import List
+from typing import List, Optional
 
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
@@ -16,6 +16,9 @@ from services.bybit_service import BybitService
 from services.telegram_service import TelegramService, SignalMessage
 from scanner.market_scanner import MarketScanner, VolatilePair
 from strategy.signal_logic import SignalGenerator, TradingSignal, SignalDirection
+
+# Import command handlers
+from handlers import admin_commands, user_commands
 
 
 class CryptoSignalBot:
@@ -234,391 +237,6 @@ class CryptoSignalBot:
 # Global bot instance for command handlers
 _bot_instance: Optional[CryptoSignalBot] = None
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start command."""
-    # Register username for future reference
-    if _bot_instance and update.effective_user:
-        username = update.effective_user.username
-        chat_id = str(update.effective_chat.id)
-        if username:
-            _bot_instance.telegram_service.register_username(username, chat_id)
-        
-        await _bot_instance.telegram_service.send_control_menu()
-
-async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /status command."""
-    if _bot_instance:
-        status = _bot_instance.telegram_service.get_schedule_status()
-        await update.message.reply_text(status)
-
-async def on_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /on command."""
-    if _bot_instance:
-        _bot_instance.telegram_service.signals_enabled = True
-        await update.message.reply_text("🟢 Сигналы ВКЛЮЧЕНЫ")
-
-async def off_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /off command."""
-    if _bot_instance:
-        _bot_instance.telegram_service.signals_enabled = False
-        await update.message.reply_text("🔴 Сигналы ОТКЛЮЧЕНЫ")
-
-async def schedule_day_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /schedule_day command."""
-    if _bot_instance:
-        from datetime import time
-        _bot_instance.telegram_service.set_schedule(time(9, 0), time(21, 0))
-        await update.message.reply_text("🌅 Расписание: 09:00 - 21:00")
-
-async def schedule_night_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /schedule_night command."""
-    if _bot_instance:
-        from datetime import time
-        _bot_instance.telegram_service.set_schedule(time(21, 0), time(9, 0))
-        await update.message.reply_text("🌙 Расписание: 21:00 - 09:00")
-
-async def schedule_always_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /schedule_always command."""
-    if _bot_instance:
-        _bot_instance.telegram_service.set_schedule(None, None)
-        await update.message.reply_text("⚡ Сигналы активны 24/7")
-
-async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /add_user command - add new subscriber (admin only).
-    
-    Usage: /add_user <chat_id|@username> [period]
-    Periods: 2 (trial), 30 (1 month), 90 (3 months), 180 (6 months)
-    """
-    if not _bot_instance:
-        return
-    
-    # Only admin can add users
-    if str(update.effective_chat.id) != str(_bot_instance.telegram_service.chat_id):
-        await update.message.reply_text("⛔ У вас нет прав для этой команды")
-        return
-    
-    if not context.args:
-        await update.message.reply_text(
-            "Использование: /add_user <chat_id|@username> [период]\n\n"
-            "Периоды:\n"
-            "• 2 - 2 дня (пробный)\n"
-            "• 30 - 1 месяц\n"
-            "• 90 - 3 месяца\n"
-            "• 180 - 6 месяцев\n\n"
-            "Примеры:\n"
-            "/add_user 123456789 30\n"
-            "/add_user @username 30"
-        )
-        return
-    
-    user_input = context.args[0]
-    
-    # Get period (default 2 days for trial)
-    days = 2
-    if len(context.args) >= 2:
-        try:
-            days = int(context.args[1])
-            if days not in [2, 30, 90, 180]:
-                await update.message.reply_text("❌ Неверный период. Используйте: 2, 30, 90 или 180")
-                return
-        except ValueError:
-            await update.message.reply_text("❌ Период должен быть числом: 2, 30, 90 или 180")
-            return
-    
-    service = _bot_instance.telegram_service
-    
-    # Add subscriber (handles both chat_id and @username)
-    success, message = service.add_subscriber(user_input, days)
-    
-    if success:
-        # Resolve to actual chat_id for notification
-        if user_input.startswith('@'):
-            chat_id = service.resolve_username(user_input)
-        else:
-            chat_id = user_input
-        
-        settings = service.get_user_settings(chat_id)
-        period_name = service._get_period_name(days)
-        
-        await update.message.reply_text(
-            f"✅ {message}\n"
-            f"⏳ Действует до: {settings.subscription_expiry[:10]}"
-        )
-        
-        # Notify user
-        if chat_id:
-            try:
-                await service.bot.send_message(
-                    chat_id=chat_id,
-                    text=f"🎉 Добро пожаловать!\n\n"
-                         f"Вам предоставлен доступ к сигналам на {period_name}.\n"
-                         f"⏳ Подписка действует до: {settings.subscription_expiry[:10]}\n\n"
-                         f"Используйте /mysettings для настройки\n"
-                         f"и /toggle для включения сигналов.",
-                    parse_mode='HTML'
-                )
-            except Exception as e:
-                logger.error(f"Failed to notify new user {chat_id}: {e}")
-    else:
-        await update.message.reply_text(f"❌ {message}")
-
-async def remove_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /remove_user command - remove subscriber (admin only)."""
-    if not _bot_instance:
-        return
-    
-    # Only admin can remove users
-    if str(update.effective_chat.id) != str(_bot_instance.telegram_service.chat_id):
-        await update.message.reply_text("⛔ У вас нет прав для этой команды")
-        return
-    
-    if not context.args:
-        await update.message.reply_text("Использование: /remove_user <chat_id>")
-        return
-    
-    chat_id = context.args[0]
-    if _bot_instance.telegram_service.remove_subscriber(chat_id):
-        await update.message.reply_text(f"✅ Пользователь {chat_id} удалён")
-    else:
-        await update.message.reply_text(f"ℹ️ Пользователь {chat_id} не найден")
-
-async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /list_users command - list all subscribers with expiry info (admin only)."""
-    if not _bot_instance:
-        return
-    
-    # Only admin can list users
-    if str(update.effective_chat.id) != str(_bot_instance.telegram_service.chat_id):
-        await update.message.reply_text("⛔ У вас нет прав для этой команды")
-        return
-    
-    service = _bot_instance.telegram_service
-    subscribers = service.subscribers
-    count = len(subscribers)
-    
-    if count == 0:
-        await update.message.reply_text("📋 Список подписчиков пуст")
-    else:
-        lines = []
-        for uid in subscribers:
-            settings = service.get_user_settings(uid)
-            days_left = settings.get_days_remaining()
-            if days_left is not None:
-                if days_left == 0:
-                    status = "🔴 истекает сегодня"
-                elif days_left <= 3:
-                    status = f"🟡 {days_left} дн."
-                else:
-                    status = f"🟢 {days_left} дн."
-                expiry = settings.subscription_expiry[:10] if settings.subscription_expiry else "?"
-                lines.append(f"• {uid} | {status} | до {expiry}")
-            else:
-                lines.append(f"• {uid} | ⚪ без срока")
-        
-        users_list = "\n".join(lines)
-        await update.message.reply_text(f"📋 Подписчики ({count}):\n{users_list}")
-
-async def extend_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /extend command - extend subscription (admin only)."""
-    if not _bot_instance:
-        return
-    
-    # Only admin can extend
-    if str(update.effective_chat.id) != str(_bot_instance.telegram_service.chat_id):
-        await update.message.reply_text("⛔ У вас нет прав для этой команды")
-        return
-    
-    if len(context.args) < 2:
-        await update.message.reply_text(
-            "Использование: /extend <chat_id|@username> <дни>\n\n"
-            "Примеры:\n"
-            "/extend 123456789 30\n"
-            "/extend @username 30"
-        )
-        return
-    
-    user_input = context.args[0]
-    
-    # Resolve username if provided
-    service = _bot_instance.telegram_service
-    if user_input.startswith('@'):
-        chat_id = service.resolve_username(user_input)
-        if not chat_id:
-            await update.message.reply_text(f"❌ Пользователь {user_input} не найден. Сначала попросите его написать боту.")
-            return
-    else:
-        chat_id = user_input
-    
-    try:
-        days = int(context.args[1])
-        if days not in [2, 30, 90, 180]:
-            await update.message.reply_text("❌ Неверный период. Используйте: 2, 30, 90 или 180")
-            return
-    except ValueError:
-        await update.message.reply_text("❌ Дни должны быть числом")
-        return
-    
-    if chat_id not in service.subscribers:
-        await update.message.reply_text(f"❌ Пользователь {user_input} не найден в подписчиках")
-        return
-    
-    if service.extend_subscription(chat_id, days):
-        settings = service.get_user_settings(chat_id)
-        period_name = service._get_period_name(days)
-        await update.message.reply_text(
-            f"✅ Подписка продлена для {user_input}\n"
-            f"📅 Добавлено: {period_name}\n"
-            f"⏳ Новый срок: {settings.subscription_expiry[:10]}"
-        )
-        
-        # Notify user
-        try:
-            await service.bot.send_message(
-                chat_id=chat_id,
-                text=f"🔄 Ваша подписка продлена!\n\n"
-                     f"📅 Добавлено: {period_name}\n"
-                     f"⏳ Новый срок: {settings.subscription_expiry[:10]}\n\n"
-                     f"Спасибо за продолжение работы с нами! 🚀",
-                parse_mode='HTML'
-            )
-        except Exception as e:
-            logger.error(f"Failed to notify user {chat_id} about extension: {e}")
-    else:
-        await update.message.reply_text(f"❌ Ошибка при продлении подписки")
-
-async def user_info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /user_info command - show detailed user info (admin only)."""
-    if not _bot_instance:
-        return
-    
-    # Only admin can view user info
-    if str(update.effective_chat.id) != str(_bot_instance.telegram_service.chat_id):
-        await update.message.reply_text("⛔ У вас нет прав для этой команды")
-        return
-    
-    if not context.args:
-        await update.message.reply_text("Использование: /user_info <chat_id>")
-        return
-    
-    chat_id = context.args[0]
-    service = _bot_instance.telegram_service
-    
-    if chat_id not in service.subscribers:
-        await update.message.reply_text(f"❌ Пользователь {chat_id} не найден")
-        return
-    
-    settings = service.get_user_settings(chat_id)
-    days_left = settings.get_days_remaining()
-    
-    status = "🟢 Активен" if settings.signals_enabled else "🔴 Отключен"
-    schedule = f"{settings.schedule_start}-{settings.schedule_end}" if settings.schedule_start else "24/7"
-    
-    message = f"""👤 <b>Пользователь:</b> <code>{chat_id}</code>
-
-📊 <b>Статус:</b> {status}
-🎯 <b>Min confidence:</b> {settings.min_confidence}%
-📅 <b>Расписание:</b> {schedule}
-
-⏳ <b>Подписка:</b>
-• Добавлен: {settings.added_date[:10] if settings.added_date else '?'}
-• Истекает: {settings.subscription_expiry[:10] if settings.subscription_expiry else '?'}
-• Осталось: {days_left if days_left is not None else '?'} дней
-"""
-    await update.message.reply_text(message, parse_mode='HTML')
-
-async def mysettings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /mysettings command - show user their settings."""
-    if not _bot_instance:
-        return
-    
-    chat_id = str(update.effective_chat.id)
-    settings = _bot_instance.telegram_service.get_user_settings(chat_id)
-    
-    schedule_str = "24/7 (без ограничений)"
-    if settings.schedule_start and settings.schedule_end:
-        schedule_str = f"{settings.schedule_start} - {settings.schedule_end}"
-    
-    status = "🟢 Включены" if settings.signals_enabled else "🔴 Отключены"
-    
-    message = f"""⚙️ <b>Ваши настройки:</b>
-
-📊 <b>Сигналы:</b> {status}
-🎯 <b>Мин. confidence:</b> {settings.min_confidence}%
-📅 <b>Расписание:</b> {schedule_str}
-
-<b>Команды для изменения:</b>
-• /toggle - Вкл/выкл сигналы
-• /setconf 80 - Установить confidence (75-95)
-• /setschedule_day - День (09:00-21:00)
-• /setschedule_night - Ночь (21:00-09:00)
-• /setschedule_always - 24/7
-"""
-    await update.message.reply_text(message, parse_mode='HTML')
-
-async def toggle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /toggle command - toggle signals for user."""
-    if not _bot_instance:
-        return
-    
-    chat_id = str(update.effective_chat.id)
-    service = _bot_instance.telegram_service
-    settings = service.get_user_settings(chat_id)
-    
-    new_state = not settings.signals_enabled
-    service.update_user_settings(chat_id, signals_enabled=new_state)
-    
-    status = "🟢 ВКЛЮЧЕНЫ" if new_state else "🔴 ОТКЛЮЧЕНЫ"
-    await update.message.reply_text(f"Сигналы {status}")
-
-async def setconf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /setconf command - set min confidence for user."""
-    if not _bot_instance:
-        return
-    
-    chat_id = str(update.effective_chat.id)
-    
-    if not context.args:
-        await update.message.reply_text("Использование: /setconf <75-95>\nПример: /setconf 80")
-        return
-    
-    try:
-        conf = int(context.args[0])
-        if conf < 50 or conf > 95:
-            await update.message.reply_text("❌ Confidence должен быть от 50 до 95")
-            return
-        
-        _bot_instance.telegram_service.update_user_settings(chat_id, min_confidence=conf)
-        await update.message.reply_text(f"✅ Минимальный confidence установлен: {conf}%")
-    except ValueError:
-        await update.message.reply_text("❌ Укажите число от 50 до 95")
-
-async def setschedule_day_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /setschedule_day command - set day schedule for user."""
-    if not _bot_instance:
-        return
-    
-    chat_id = str(update.effective_chat.id)
-    _bot_instance.telegram_service.update_user_settings(chat_id, schedule_start="09:00", schedule_end="21:00")
-    await update.message.reply_text("🌅 Расписание установлено: 09:00 - 21:00")
-
-async def setschedule_night_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /setschedule_night command - set night schedule for user."""
-    if not _bot_instance:
-        return
-    
-    chat_id = str(update.effective_chat.id)
-    _bot_instance.telegram_service.update_user_settings(chat_id, schedule_start="21:00", schedule_end="09:00")
-    await update.message.reply_text("🌙 Расписание установлено: 21:00 - 09:00")
-
-async def setschedule_always_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /setschedule_always command - set 24/7 schedule for user."""
-    if not _bot_instance:
-        return
-    
-    chat_id = str(update.effective_chat.id)
-    _bot_instance.telegram_service.update_user_settings(chat_id, schedule_start=None, schedule_end=None)
-    await update.message.reply_text("⚡ Расписание отключено. Сигналы 24/7")
-
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle inline keyboard callbacks."""
     query = update.callback_query
@@ -630,6 +248,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=f"{result}\n\nНажмите /start для меню",
             reply_markup=_bot_instance.telegram_service.get_control_keyboard()
         )
+
+
+def setup_command_handlers(bot_instance: CryptoSignalBot):
+    """Setup bot instance for all command handlers."""
+    global _bot_instance
+    _bot_instance = bot_instance
+    admin_commands.set_bot_instance(bot_instance)
+    user_commands.set_bot_instance(bot_instance)
 
 async def subscription_checker_task(bot: CryptoSignalBot):
     """Background task to check subscription expirations daily."""
@@ -686,32 +312,33 @@ async def subscription_checker_task(bot: CryptoSignalBot):
 
 async def run_telegram_app(bot: CryptoSignalBot):
     """Run Telegram bot application for command handling."""
-    global _bot_instance
-    _bot_instance = bot
+    # Setup command handlers with bot instance
+    setup_command_handlers(bot)
     
     application = Application.builder().token(config.TELEGRAM_TOKEN).build()
     
-    # Add command handlers
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("op", start_command))  # Alias for menu
-    application.add_handler(CommandHandler("status", status_command))
-    application.add_handler(CommandHandler("on", on_command))
-    application.add_handler(CommandHandler("off", off_command))
-    application.add_handler(CommandHandler("schedule_day", schedule_day_command))
-    application.add_handler(CommandHandler("schedule_night", schedule_night_command))
-    application.add_handler(CommandHandler("schedule_always", schedule_always_command))
-    application.add_handler(CommandHandler("add_user", add_user_command))
-    application.add_handler(CommandHandler("remove_user", remove_user_command))
-    application.add_handler(CommandHandler("list_users", list_users_command))
-    application.add_handler(CommandHandler("extend", extend_command))
-    application.add_handler(CommandHandler("user_info", user_info_command))
-    # User settings commands
-    application.add_handler(CommandHandler("mysettings", mysettings_command))
-    application.add_handler(CommandHandler("toggle", toggle_command))
-    application.add_handler(CommandHandler("setconf", setconf_command))
-    application.add_handler(CommandHandler("setschedule_day", setschedule_day_command))
-    application.add_handler(CommandHandler("setschedule_night", setschedule_night_command))
-    application.add_handler(CommandHandler("setschedule_always", setschedule_always_command))
+    # Add command handlers - Admin commands
+    application.add_handler(CommandHandler("add_user", admin_commands.add_user_command))
+    application.add_handler(CommandHandler("remove_user", admin_commands.remove_user_command))
+    application.add_handler(CommandHandler("list_users", admin_commands.list_users_command))
+    application.add_handler(CommandHandler("extend", admin_commands.extend_command))
+    application.add_handler(CommandHandler("user_info", admin_commands.user_info_command))
+    
+    # Add command handlers - User commands
+    application.add_handler(CommandHandler("start", user_commands.start_command))
+    application.add_handler(CommandHandler("op", user_commands.start_command))  # Alias for menu
+    application.add_handler(CommandHandler("status", user_commands.status_command))
+    application.add_handler(CommandHandler("on", user_commands.on_command))
+    application.add_handler(CommandHandler("off", user_commands.off_command))
+    application.add_handler(CommandHandler("schedule_day", user_commands.schedule_day_command))
+    application.add_handler(CommandHandler("schedule_night", user_commands.schedule_night_command))
+    application.add_handler(CommandHandler("schedule_always", user_commands.schedule_always_command))
+    application.add_handler(CommandHandler("mysettings", user_commands.mysettings_command))
+    application.add_handler(CommandHandler("toggle", user_commands.toggle_command))
+    application.add_handler(CommandHandler("setconf", user_commands.setconf_command))
+    application.add_handler(CommandHandler("setschedule_day", user_commands.setschedule_day_command))
+    application.add_handler(CommandHandler("setschedule_night", user_commands.setschedule_night_command))
+    application.add_handler(CommandHandler("setschedule_always", user_commands.setschedule_always_command))
     application.add_handler(CallbackQueryHandler(button_callback))
     
     # Start the bot
