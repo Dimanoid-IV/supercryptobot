@@ -611,6 +611,59 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=_bot_instance.telegram_service.get_control_keyboard()
         )
 
+async def subscription_checker_task(bot: CryptoSignalBot):
+    """Background task to check subscription expirations daily."""
+    from datetime import datetime, timedelta
+    
+    logger.info("Subscription checker task started")
+    
+    # Wait a bit for bot to fully initialize
+    await asyncio.sleep(60)
+    
+    last_check_date = None
+    
+    while bot.is_running:
+        try:
+            now = datetime.now()
+            current_date = now.date()
+            
+            # Check once per day at 9:00 AM
+            if current_date != last_check_date and now.hour >= 9:
+                logger.info("Running daily subscription check...")
+                
+                service = bot.telegram_service
+                
+                # Check for expiring and expired subscriptions
+                expiring_soon, just_expired = await service.check_expiring_subscriptions(days_before=3)
+                
+                # Notify users about upcoming expiry
+                if expiring_soon:
+                    await service.notify_expiring_users(expiring_soon)
+                
+                # Notify users whose subscriptions just expired
+                if just_expired:
+                    await service.notify_expired_users(just_expired)
+                
+                # Remove expired subscribers from the list
+                removed = service.remove_expired_subscribers()
+                
+                # Notify admin about all expirations
+                await service.notify_admin_about_expired(removed, expiring_soon)
+                
+                if expiring_soon or removed:
+                    logger.info(f"Subscription check complete: {len(expiring_soon)} expiring soon, {len(removed)} removed")
+                else:
+                    logger.info("Subscription check complete: no expirations")
+                
+                last_check_date = current_date
+            
+            # Check every hour
+            await asyncio.sleep(3600)
+            
+        except Exception as e:
+            logger.error(f"Error in subscription checker: {e}")
+            await asyncio.sleep(3600)  # Wait an hour before retrying
+
 async def run_telegram_app(bot: CryptoSignalBot):
     """Run Telegram bot application for command handling."""
     global _bot_instance
@@ -661,10 +714,11 @@ async def main():
     bot = CryptoSignalBot()
     
     try:
-        # Run both the main bot and Telegram command handler
+        # Run the main bot, Telegram command handler, and subscription checker
         await asyncio.gather(
             bot.start(),
-            run_telegram_app(bot)
+            run_telegram_app(bot),
+            subscription_checker_task(bot)
         )
     except Exception as e:
         logger.error(f"Fatal error: {e}")
