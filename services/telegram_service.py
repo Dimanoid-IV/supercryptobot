@@ -33,6 +33,63 @@ class SignalMessage:
     additional_info: Optional[str] = None
 
 
+@dataclass
+class UserSettings:
+    """Per-user settings for signal filtering."""
+    chat_id: str
+    signals_enabled: bool = True
+    min_confidence: int = 75  # Default from config
+    schedule_start: Optional[str] = None  # "09:00" format or None for 24/7
+    schedule_end: Optional[str] = None    # "21:00" format or None for 24/7
+    max_signals_per_day: int = 1000  # Default high limit
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            'chat_id': self.chat_id,
+            'signals_enabled': self.signals_enabled,
+            'min_confidence': self.min_confidence,
+            'schedule_start': self.schedule_start,
+            'schedule_end': self.schedule_end,
+            'max_signals_per_day': self.max_signals_per_day
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'UserSettings':
+        """Create UserSettings from dictionary."""
+        return cls(
+            chat_id=data.get('chat_id', ''),
+            signals_enabled=data.get('signals_enabled', True),
+            min_confidence=data.get('min_confidence', 75),
+            schedule_start=data.get('schedule_start'),
+            schedule_end=data.get('schedule_end'),
+            max_signals_per_day=data.get('max_signals_per_day', 1000)
+        )
+    
+    def is_signals_allowed_now(self) -> bool:
+        """Check if signals are allowed based on schedule and enabled status."""
+        if not self.signals_enabled:
+            return False
+        
+        # No schedule set - always allowed
+        if self.schedule_start is None or self.schedule_end is None:
+            return True
+        
+        try:
+            now = datetime.now().time()
+            start_hour, start_min = map(int, self.schedule_start.split(':'))
+            end_hour, end_min = map(int, self.schedule_end.split(':'))
+            start_time = time(start_hour, start_min)
+            end_time = time(end_hour, end_min)
+            
+            if start_time <= end_time:
+                return start_time <= now <= end_time
+            else:
+                return now >= start_time or now <= end_time
+        except Exception:
+            return True  # Allow on error
+
+
 class TelegramService:
     """Service class for Telegram notifications."""
     
@@ -45,7 +102,10 @@ class TelegramService:
         self.subscribers_file = "subscribers.json"
         self.subscribers = self._load_subscribers()
         
-        # Signal control settings
+        # Load per-user settings
+        self.user_settings: dict[str, UserSettings] = self._load_user_settings()
+        
+        # Signal control settings (admin/global)
         self.signals_enabled = True
         self.auto_start_time: Optional[time] = None  # e.g., time(9, 0) for 09:00
         self.auto_stop_time: Optional[time] = None   # e.g., time(21, 0) for 21:00
@@ -69,11 +129,49 @@ class TelegramService:
     def _save_subscribers(self):
         """Save subscriber chat IDs to file."""
         try:
+            data = {
+                'chat_ids': self.subscribers,
+                'user_settings': {k: v.to_dict() for k, v in self.user_settings.items()}
+            }
             with open(self.subscribers_file, 'w') as f:
-                json.dump({'chat_ids': self.subscribers}, f)
+                json.dump(data, f, indent=2)
             logger.info(f"Subscribers saved: {len(self.subscribers)} total")
         except Exception as e:
             logger.error(f"Failed to save subscribers: {e}")
+    
+    def _load_user_settings(self) -> dict[str, UserSettings]:
+        """Load per-user settings from file."""
+        if os.path.exists(self.subscribers_file):
+            try:
+                with open(self.subscribers_file, 'r') as f:
+                    data = json.load(f)
+                    settings_data = data.get('user_settings', {})
+                    return {k: UserSettings.from_dict(v) for k, v in settings_data.items()}
+            except Exception as e:
+                logger.error(f"Failed to load user settings: {e}")
+        return {}
+    
+    def get_user_settings(self, chat_id: str) -> UserSettings:
+        """Get or create user settings for a chat_id."""
+        chat_id_str = str(chat_id)
+        if chat_id_str not in self.user_settings:
+            self.user_settings[chat_id_str] = UserSettings(chat_id=chat_id_str)
+            self._save_subscribers()
+        return self.user_settings[chat_id_str]
+    
+    def update_user_settings(self, chat_id: str, **kwargs) -> bool:
+        """Update user settings."""
+        chat_id_str = str(chat_id)
+        settings = self.get_user_settings(chat_id_str)
+        
+        for key, value in kwargs.items():
+            if hasattr(settings, key):
+                setattr(settings, key, value)
+        
+        self.user_settings[chat_id_str] = settings
+        self._save_subscribers()
+        logger.info(f"Updated settings for user {chat_id_str}: {kwargs}")
+        return True
     
     def add_subscriber(self, chat_id: str) -> bool:
         """Add a new subscriber."""
@@ -230,7 +328,7 @@ class TelegramService:
     
     async def send_signal(self, signal: SignalMessage) -> bool:
         """
-        Send a trading signal to all subscribers.
+        Send a trading signal to all subscribers respecting their individual settings.
         
         Args:
             signal: SignalMessage object
@@ -241,7 +339,7 @@ class TelegramService:
         try:
             message = self._format_signal_message(signal)
             
-            # Send to main admin chat
+            # Send to main admin chat (always, no filtering)
             success_count = 0
             
             if self.chat_id:
@@ -256,9 +354,25 @@ class TelegramService:
                 except Exception as e:
                     logger.error(f"Failed to send to main chat: {e}")
             
-            # Send to all subscribers
+            # Send to subscribers respecting their individual settings
             for chat_id in self.subscribers:
                 try:
+                    # Get user settings
+                    settings = self.get_user_settings(chat_id)
+                    
+                    # Check if signals are enabled for this user
+                    if not settings.signals_enabled:
+                        continue
+                    
+                    # Check confidence threshold
+                    if signal.confidence < settings.min_confidence:
+                        continue
+                    
+                    # Check schedule
+                    if not settings.is_signals_allowed_now():
+                        continue
+                    
+                    # Send signal to this user
                     await self.bot.send_message(
                         chat_id=chat_id,
                         text=message,
@@ -266,6 +380,7 @@ class TelegramService:
                         disable_web_page_preview=True
                     )
                     success_count += 1
+                    
                 except Exception as e:
                     logger.error(f"Failed to send to subscriber {chat_id}: {e}")
             
