@@ -3,7 +3,9 @@ Telegram service for sending trading signals.
 Handles all Telegram bot interactions and message formatting.
 """
 
-from typing import Optional, Callable
+import json
+import os
+from typing import Optional, Callable, List
 from dataclasses import dataclass
 from datetime import datetime, time
 
@@ -39,6 +41,10 @@ class TelegramService:
         self.bot = Bot(token=config.TELEGRAM_TOKEN)
         self.chat_id = config.TELEGRAM_CHAT_ID
         
+        # Load subscribed users from file
+        self.subscribers_file = "subscribers.json"
+        self.subscribers = self._load_subscribers()
+        
         # Signal control settings
         self.signals_enabled = True
         self.auto_start_time: Optional[time] = None  # e.g., time(9, 0) for 09:00
@@ -47,7 +53,51 @@ class TelegramService:
         # Callback for settings change
         self.on_settings_change: Optional[Callable] = None
         
-        logger.info("TelegramService initialized")
+        logger.info(f"TelegramService initialized with {len(self.subscribers)} subscribers")
+    
+    def _load_subscribers(self) -> List[str]:
+        """Load subscriber chat IDs from file."""
+        if os.path.exists(self.subscribers_file):
+            try:
+                with open(self.subscribers_file, 'r') as f:
+                    data = json.load(f)
+                    return data.get('chat_ids', [])
+            except Exception as e:
+                logger.error(f"Failed to load subscribers: {e}")
+        return []
+    
+    def _save_subscribers(self):
+        """Save subscriber chat IDs to file."""
+        try:
+            with open(self.subscribers_file, 'w') as f:
+                json.dump({'chat_ids': self.subscribers}, f)
+            logger.info(f"Subscribers saved: {len(self.subscribers)} total")
+        except Exception as e:
+            logger.error(f"Failed to save subscribers: {e}")
+    
+    def add_subscriber(self, chat_id: str) -> bool:
+        """Add a new subscriber."""
+        chat_id_str = str(chat_id)
+        if chat_id_str not in self.subscribers:
+            self.subscribers.append(chat_id_str)
+            self._save_subscribers()
+            logger.info(f"New subscriber added: {chat_id_str}")
+            return True
+        return False
+    
+    def remove_subscriber(self, chat_id: str) -> bool:
+        """Remove a subscriber."""
+        chat_id_str = str(chat_id)
+        if chat_id_str in self.subscribers:
+            self.subscribers.remove(chat_id_str)
+            self._save_subscribers()
+            logger.info(f"Subscriber removed: {chat_id_str}")
+            return True
+        return False
+    
+    def get_subscribers_count(self) -> int:
+        """Get number of subscribers."""
+        return len(self.subscribers)
     
     def is_signals_allowed(self) -> bool:
         """Check if signals are currently allowed (manual + auto schedule)."""
@@ -180,26 +230,47 @@ class TelegramService:
     
     async def send_signal(self, signal: SignalMessage) -> bool:
         """
-        Send a trading signal to Telegram.
+        Send a trading signal to all subscribers.
         
         Args:
             signal: SignalMessage object
             
         Returns:
-            True if sent successfully, False otherwise
+            True if sent successfully to at least one subscriber
         """
         try:
             message = self._format_signal_message(signal)
             
-            await self.bot.send_message(
-                chat_id=self.chat_id,
-                text=message,
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True
-            )
+            # Send to main admin chat
+            success_count = 0
             
-            logger.info(f"Signal sent to Telegram for {signal.pair} {signal.direction}")
-            return True
+            if self.chat_id:
+                try:
+                    await self.bot.send_message(
+                        chat_id=self.chat_id,
+                        text=message,
+                        parse_mode=ParseMode.HTML,
+                        disable_web_page_preview=True
+                    )
+                    success_count += 1
+                except Exception as e:
+                    logger.error(f"Failed to send to main chat: {e}")
+            
+            # Send to all subscribers
+            for chat_id in self.subscribers:
+                try:
+                    await self.bot.send_message(
+                        chat_id=chat_id,
+                        text=message,
+                        parse_mode=ParseMode.HTML,
+                        disable_web_page_preview=True
+                    )
+                    success_count += 1
+                except Exception as e:
+                    logger.error(f"Failed to send to subscriber {chat_id}: {e}")
+            
+            logger.info(f"Signal sent to {success_count} recipients for {signal.pair} {signal.direction}")
+            return success_count > 0
             
         except Exception as e:
             logger.error(f"Failed to send Telegram message: {e}")

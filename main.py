@@ -1,4 +1,4 @@
-"""
+                                                                                    """
 Main entry point for Crypto Signal Bot.
 Runs the main event loop for scanning markets and generating signals.
 """
@@ -277,6 +277,65 @@ async def schedule_always_command(update: Update, context: ContextTypes.DEFAULT_
         _bot_instance.telegram_service.set_schedule(None, None)
         await update.message.reply_text("⚡ Сигналы активны 24/7")
 
+async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /add_user command - add new subscriber (admin only)."""
+    if not _bot_instance:
+        return
+    
+    # Only admin can add users
+    if str(update.effective_chat.id) != str(_bot_instance.telegram_service.chat_id):
+        await update.message.reply_text("⛔ У вас нет прав для этой команды")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Использование: /add_user <chat_id>")
+        return
+    
+    chat_id = context.args[0]
+    if _bot_instance.telegram_service.add_subscriber(chat_id):
+        await update.message.reply_text(f"✅ Пользователь {chat_id} добавлен")
+    else:
+        await update.message.reply_text(f"ℹ️ Пользователь {chat_id} уже в списке")
+
+async def remove_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /remove_user command - remove subscriber (admin only)."""
+    if not _bot_instance:
+        return
+    
+    # Only admin can remove users
+    if str(update.effective_chat.id) != str(_bot_instance.telegram_service.chat_id):
+        await update.message.reply_text("⛔ У вас нет прав для этой команды")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Использование: /remove_user <chat_id>")
+        return
+    
+    chat_id = context.args[0]
+    if _bot_instance.telegram_service.remove_subscriber(chat_id):
+        await update.message.reply_text(f"✅ Пользователь {chat_id} удалён")
+    else:
+        await update.message.reply_text(f"ℹ️ Пользователь {chat_id} не найден")
+
+async def list_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /list_users command - list all subscribers (admin only)."""
+    if not _bot_instance:
+        return
+    
+    # Only admin can list users
+    if str(update.effective_chat.id) != str(_bot_instance.telegram_service.chat_id):
+        await update.message.reply_text("⛔ У вас нет прав для этой команды")
+        return
+    
+    subscribers = _bot_instance.telegram_service.subscribers
+    count = len(subscribers)
+    
+    if count == 0:
+        await update.message.reply_text("📋 Список подписчиков пуст")
+    else:
+        users_list = "\n".join([f"• {uid}" for uid in subscribers])
+        await update.message.reply_text(f"📋 Подписчики ({count}):\n{users_list}")
+
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle inline keyboard callbacks."""
     query = update.callback_query
@@ -305,6 +364,9 @@ async def run_telegram_app(bot: CryptoSignalBot):
     application.add_handler(CommandHandler("schedule_day", schedule_day_command))
     application.add_handler(CommandHandler("schedule_night", schedule_night_command))
     application.add_handler(CommandHandler("schedule_always", schedule_always_command))
+    application.add_handler(CommandHandler("add_user", add_user_command))
+    application.add_handler(CommandHandler("remove_user", remove_user_command))
+    application.add_handler(CommandHandler("list_users", list_users_command))
     application.add_handler(CallbackQueryHandler(button_callback))
     
     # Start the bot
