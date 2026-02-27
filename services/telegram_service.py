@@ -409,6 +409,11 @@ class TelegramService:
         
         payment_text = "\n".join(payment_options) if payment_options else "Свяжитесь с администратором для оплаты."
         
+        # Build support contact text
+        support_text = ""
+        if config.SUPPORT_USERNAME:
+            support_text = f"\n\n💬 <b>Поддержка:</b> @{config.SUPPORT_USERNAME}"
+        
         for chat_id, days_left in expiring_soon:
             try:
                 if days_left == 0:
@@ -423,7 +428,7 @@ class TelegramService:
 • 3 месяца
 • 6 месяцев
 
-После оплаты отправьте скриншот администратору.
+После оплаты отправьте скриншот администратору.{support_text}
 
 Используйте /mysettings для проверки статуса."""
                 else:
@@ -438,7 +443,7 @@ class TelegramService:
 • 3 месяца
 • 6 месяцев
 
-После оплаты отправьте скриншот администратору."""
+После оплаты отправьте скриншот администратору.{support_text}"""
                 
                 await self.bot.send_message(
                     chat_id=chat_id,
@@ -468,6 +473,11 @@ class TelegramService:
         
         payment_text = "\n\n".join(payment_options) if payment_options else "Свяжитесь с администратором для оплаты."
         
+        # Build support contact text
+        support_text = ""
+        if config.SUPPORT_USERNAME:
+            support_text = f"\n\n💬 <b>Поддержка:</b> @{config.SUPPORT_USERNAME}"
+        
         for chat_id in expired:
             try:
                 message = f"""🔴 <b>Ваша подписка истекла</b>
@@ -483,7 +493,7 @@ class TelegramService:
 • 3 месяца
 • 6 месяцев
 
-После оплаты отправьте скриншот администратору для активации.
+После оплаты отправьте скриншот администратору для активации.{support_text}
 
 Спасибо за использование нашего бота! 🙏"""
                 

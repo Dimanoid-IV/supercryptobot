@@ -88,6 +88,7 @@ class Config:
     STRIPE_PAYMENT_LINK: str = os.getenv("STRIPE_PAYMENT_LINK", "")
     CRYPTO_WALLET_USDT: str = os.getenv("CRYPTO_WALLET_USDT", "")
     CRYPTO_NETWORK: str = os.getenv("CRYPTO_NETWORK", "TRC20")  # TRC20, ERC20, etc.
+    SUPPORT_USERNAME: str = os.getenv("SUPPORT_USERNAME", "")  # Without @, e.g. "username"
     
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")

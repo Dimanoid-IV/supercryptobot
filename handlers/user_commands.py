@@ -6,6 +6,7 @@ Handles user settings and preferences.
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
+from config import config
 from utils.helpers import logger
 
 
@@ -67,11 +68,18 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 """
         
         # Create keyboard with request button
-        keyboard = InlineKeyboardMarkup([
+        keyboard_buttons = [
             [InlineKeyboardButton("🚀 Запросить пробный период", callback_data="request_trial")],
-            [InlineKeyboardButton("📊 Подробнее о сигналах", callback_data="about_signals")],
-            [InlineKeyboardButton("💬 Связаться с поддержкой", url="https://t.me/your_support_username")]
-        ])
+            [InlineKeyboardButton("📊 Подробнее о сигналах", callback_data="about_signals")]
+        ]
+        
+        # Add support button if username is configured
+        if config.SUPPORT_USERNAME:
+            keyboard_buttons.append(
+                [InlineKeyboardButton("💬 Связаться с поддержкой", url=f"https://t.me/{config.SUPPORT_USERNAME}")]
+            )
+        
+        keyboard = InlineKeyboardMarkup(keyboard_buttons)
         
         await update.message.reply_text(
             welcome_text,
