@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+
+{% block title %}Админ-панель - Crypto Bot{% endblock %}
+
+{% block content %}
+<header>
+    <div class="container">
+        <h1>🤖 Crypto Signal Bot - Admin Panel</h1>
+        <nav>
+            <a href="{{ url_for('admin') }}">Пользователи</a>
+            <a href="{{ url_for('logout') }}">Выйти</a>
+        </nav>
+    </div>
+</header>
+
+<div class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="flash-messages">
+                {% for category, message in messages %}
+                    <div class="flash {{ category }}">{{ message }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <!-- Statistics -->
+    <div class="stats-grid">
+        <div class="stat-card total">
+            <h3>Всего пользователей</h3>
+            <div class="number">{{ stats.total }}</div>
+        </div>
+        <div class="stat-card active">
+            <h3>Активные</h3>
+            <div class="number">{{ stats.active }}</div>
+        </div>
+        <div class="stat-card expiring">
+            <h3>Истекают</h3>
+            <div class="number">{{ stats.expiring }}</div>
+        </div>
+        <div class="stat-card expired">
+            <h3>Истекли</h3>
+            <div class="number">{{ stats.expired }}</div>
+        </div>
+    </div>
+
+    <!-- Add User Form -->
+    <div class="card">
+        <h2>➕ Добавить пользователя</h2>
+        <form method="POST" action="{{ url_for('add_user') }}">
+            <div class="form-group">
+                <label for="user_id">Chat ID или @username</label>
+                <input type="text" id="user_id" name="user_id" required 
+                       placeholder="123456789 или @username">
+            </div>
+            <div class="form-group">
+                <label for="days_add">Дней</label>
+                <select id="days_add" name="days">
+                    <option value="2">2 дня (пробный)</option>
+                    <option value="30">30 дней (1 мес)</option>
+                    <option value="90">90 дней (3 мес)</option>
+                    <option value="180">180 дней (6 мес)</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary">Добавить</button>
+        </form>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="card">
+        <h2>⚡ Быстрые действия</h2>
+        <form method="POST" action="{{ url_for('extend_subscription') }}" style="margin-bottom: 15px;">
+            <div class="form-group">
+                <label for="extend_user_id">Продлить подписку</label>
+                <input type="text" id="extend_user_id" name="user_id" required 
+                       placeholder="Chat ID или @username">
+            </div>
+            <div class="form-group">
+                <label for="days_extend">Дней</label>
+                <select id="days_extend" name="days">
+                    <option value="30">30 дней</option>
+                    <option value="90">90 дней</option>
+                    <option value="180">180 дней</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary">Продлить</button>
+        </form>
+
+        <form method="POST" action="{{ url_for('remove_user') }}">
+            <div class="form-group">
+                <label for="remove_user_id">Удалить пользователя</label>
+                <input type="text" id="remove_user_id" name="user_id" required 
+                       placeholder="Chat ID или @username">
+            </div>
+            <button type="submit" class="btn btn-danger">Удалить</button>
+        </form>
+    </div>
+
+    <!-- Users Table -->
+    <div class="card">
+        <h2>👥 Список пользователей</h2>
+        {% if users %}
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Username</th>
+                    <th>Статус</th>
+                    <th>Осталось дней</th>
+                    <th>Истекает</th>
+                    <th>Добавлен</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr>
+                    <td>{{ user.chat_id[:20] }}{% if user.chat_id|length > 20 %}...{% endif %}</td>
+                    <td>@{{ user.username }}</td>
+                    <td>
+                        <span class="status {{ user.status }}">
+                            {% if user.status == 'active' %}Активен
+                            {% elif user.status == 'expiring' %}Истекает
+                            {% else %}Истек{% endif %}
+                        </span>
+                    </td>
+                    <td>
+                        {% if user.days_left is not none %}
+                            <span class="days-left 
+                                {% if user.days_left > 7 %}positive
+                                {% elif user.days_left > 0 %}warning
+                                {% else %}negative{% endif %}">
+                                {{ user.days_left }} дн.
+                            </span>
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>{{ user.expiry[:10] if user.expiry != 'N/A' else '-' }}</td>
+                    <td>{{ user.added_date[:10] if user.added_date != 'N/A' else '-' }}</td>
+                    <td class="actions">
+                        <a href="{{ url_for('user_detail', user_id=user.chat_id) }}" 
+                           class="btn btn-primary btn-small">Подробнее</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="color: #90a4ae; text-align: center; padding: 40px;">
+            Пользователей пока нет. Добавьте первого пользователя выше.
+        </p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

@@ -311,13 +311,13 @@ class TelegramService:
         else:
             return f"{days} дней"
     
-    def extend_subscription(self, chat_id: str, days: int) -> bool:
-        """Extend subscriber's subscription."""
+    def extend_subscription(self, chat_id: str, days: int) -> tuple[bool, str]:
+        """Extend subscriber's subscription. Returns (success, message)."""
         from datetime import timedelta
         
         chat_id_str = str(chat_id)
         if chat_id_str not in self.subscribers:
-            return False
+            return False, "Пользователь не найден"
         
         settings = self.get_user_settings(chat_id_str)
         
@@ -334,7 +334,7 @@ class TelegramService:
         self._save_subscribers()
         
         logger.info(f"Extended subscription for {chat_id_str} by {days} days")
-        return True
+        return True, f"Подписка продлена до {new_expiry.strftime('%Y-%m-%d')}"
     
     def get_expired_subscribers(self) -> list[str]:
         """Get list of expired subscribers."""

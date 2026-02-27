@@ -2,8 +2,8 @@
 # This file configures the Crypto Signal Bot for deployment on Render
 
 services:
-  # Background worker service
-  - type: worker
+  # Web service (runs bot + web admin panel)
+  - type: web
     name: crypto-signal-bot
     runtime: python
     pythonVersion: 3.11.0
@@ -23,12 +23,24 @@ services:
         sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: STRIPE_PAYMENT_LINK
+        sync: false
+      - key: CRYPTO_WALLET_USDT
+        sync: false
+      - key: CRYPTO_NETWORK
+        value: TRC20
+      - key: SUPPORT_USERNAME
+        sync: false
       - key: LOG_LEVEL
         value: INFO
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: FLASK_SECRET_KEY
+        generateValue: true
     
-    # Health check (optional, for monitoring)
+    # Health check
     healthCheckPath: /
     
     # Auto-deploy on git push

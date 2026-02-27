@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block title %}Пользователь {{ user.username }} - Crypto Bot Admin{% endblock %}
+
+{% block content %}
+<header>
+    <div class="container">
+        <h1>🤖 Crypto Signal Bot - Admin Panel</h1>
+        <nav>
+            <a href="{{ url_for('admin') }}">← Назад к списку</a>
+            <a href="{{ url_for('logout') }}">Выйти</a>
+        </nav>
+    </div>
+</header>
+
+<div class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="flash-messages">
+                {% for category, message in messages %}
+                    <div class="flash {{ category }}">{{ message }}</div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <div class="card">
+        <h2>👤 Информация о пользователе</h2>
+        <table style="max-width: 600px;">
+            <tr>
+                <td style="color: #90a4ae;">Chat ID:</td>
+                <td><code>{{ user.chat_id }}</code></td>
+            </tr>
+            <tr>
+                <td style="color: #90a4ae;">Username:</td>
+                <td>@{{ user.username }}</td>
+            </tr>
+            <tr>
+                <td style="color: #90a4ae;">Статус:</td>
+                <td>
+                    <span class="status {{ user.status }}">
+                        {% if user.status == 'active' %}Активен
+                        {% elif user.status == 'expiring' %}Истекает
+                        {% else %}Истек{% endif %}
+                    </span>
+                </td>
+            </tr>
+            <tr>
+                <td style="color: #90a4ae;">Добавлен:</td>
+                <td>{{ user.added_date }}</td>
+            </tr>
+            <tr>
+                <td style="color: #90a4ae;">Подписка до:</td>
+                <td>{{ user.expiry }}</td>
+            </tr>
+            <tr>
+                <td style="color: #90a4ae;">Осталось дней:</td>
+                <td>
+                    {% if user.days_left is not none %}
+                        <span class="days-left 
+                            {% if user.days_left > 7 %}positive
+                            {% elif user.days_left > 0 %}warning
+                            {% else %}negative{% endif %}">
+                            {{ user.days_left }} дн.
+                        </span>
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <td style="color: #90a4ae;">Сигналы:</td>
+                <td>{{ 'Включены' if user.signals_enabled else 'Выключены' }}</td>
+            </tr>
+            <tr>
+                <td style="color: #90a4ae;">Min Confidence:</td>
+                <td>{{ user.min_confidence }}%</td>
+            </tr>
+            {% if user.schedule_start and user.schedule_end %}
+            <tr>
+                <td style="color: #90a4ae;">Расписание:</td>
+                <td>{{ user.schedule_start }} - {{ user.schedule_end }}</td>
+            </tr>
+            {% endif %}
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>⚡ Действия</h2>
+        
+        <form method="POST" action="{{ url_for('extend_subscription') }}" style="margin-bottom: 20px;">
+            <input type="hidden" name="user_id" value="{{ user.chat_id }}">
+            <div class="form-group">
+                <label>Продлить подписку</label>
+                <div style="display: flex; gap: 10px;">
+                    <select name="days" style="width: auto;">
+                        <option value="30">30 дней ($29)</option>
+                        <option value="90">90 дней ($79)</option>
+                        <option value="180">180 дней ($149)</option>
+                    </select>
+                    <button type="submit" class="btn btn-primary">Продлить</button>
+                </div>
+            </div>
+        </form>
+
+        <form method="POST" action="{{ url_for('remove_user') }}" 
+              onsubmit="return confirm('Удалить пользователя? Это действие нельзя отменить.');">
+            <input type="hidden" name="user_id" value="{{ user.chat_id }}">
+            <button type="submit" class="btn btn-danger">Удалить пользователя</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -20,5 +20,8 @@ requests==2.32.3
 # Async Support
 aiohttp==3.11.11
 
+# Web Admin Panel
+flask==3.0.3
+
 # Environment Variables (optional, for local development)
 python-dotenv==1.0.1

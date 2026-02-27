@@ -90,6 +90,9 @@ class Config:
     CRYPTO_NETWORK: str = os.getenv("CRYPTO_NETWORK", "TRC20")  # TRC20, ERC20, etc.
     SUPPORT_USERNAME: str = os.getenv("SUPPORT_USERNAME", "")  # Without @, e.g. "username"
     
+    # Admin panel settings
+    ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "")  # For web admin panel access
+    
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

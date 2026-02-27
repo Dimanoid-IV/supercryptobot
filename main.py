@@ -1,10 +1,12 @@
 """
 Main entry point for Crypto Signal Bot.
 Runs the main event loop for scanning markets and generating signals.
+Also starts web admin panel.
 """
 
 import asyncio
 import sys
+import threading
 from typing import List, Optional
 
 from telegram import Update
@@ -19,6 +21,9 @@ from strategy.signal_logic import SignalGenerator, TradingSignal, SignalDirectio
 
 # Import command handlers
 from handlers import admin_commands, user_commands
+
+# Import web admin
+from web_admin import create_app
 
 
 class CryptoSignalBot:
@@ -428,9 +433,25 @@ async def run_telegram_app(bot: CryptoSignalBot):
     await application.stop()
     await application.shutdown()
 
+def run_web_admin(bot: CryptoSignalBot):
+    """Run Flask web admin panel in separate thread."""
+    try:
+        app = create_app(telegram_service=bot.telegram_service, config=config)
+        port = int(os.getenv('PORT', 5000))
+        # Run on 0.0.0.0 to accept external connections
+        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    except Exception as e:
+        logger.error(f"Web admin error: {e}")
+
+
 async def main():
     """Main entry point."""
     bot = CryptoSignalBot()
+    
+    # Start web admin panel in separate thread
+    web_thread = threading.Thread(target=run_web_admin, args=(bot,), daemon=True)
+    web_thread.start()
+    logger.info(f"Web admin panel started on port {os.getenv('PORT', 5000)}")
     
     try:
         # Run the main bot, Telegram command handler, and subscription checker
