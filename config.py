@@ -84,6 +84,11 @@ class Config:
     MAX_RETRIES: int = 3
     RETRY_DELAY_SECONDS: int = 5
     
+    # Payment settings
+    STRIPE_PAYMENT_LINK: str = os.getenv("STRIPE_PAYMENT_LINK", "")
+    CRYPTO_WALLET_USDT: str = os.getenv("CRYPTO_WALLET_USDT", "")
+    CRYPTO_NETWORK: str = os.getenv("CRYPTO_NETWORK", "TRC20")  # TRC20, ERC20, etc.
+    
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

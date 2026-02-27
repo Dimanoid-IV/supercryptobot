@@ -392,47 +392,107 @@ class TelegramService:
         return expiring_soon, just_expired
     
     async def notify_expiring_users(self, expiring_soon: list[tuple[str, int]]):
-        """Send expiry warning notifications to users."""
+        """Send expiry warning notifications to users with payment options."""
+        from config import config
+        
+        # Build payment message based on available payment methods
+        payment_options = []
+        
+        if config.STRIPE_PAYMENT_LINK:
+            payment_options.append(f"💳 <b>Карта:</b> {config.STRIPE_PAYMENT_LINK}")
+        
+        if config.CRYPTO_WALLET_USDT:
+            payment_options.append(
+                f"💎 <b>USDT {config.CRYPTO_NETWORK}:</b>\n"
+                f"<code>{config.CRYPTO_WALLET_USDT}</code>"
+            )
+        
+        payment_text = "\n".join(payment_options) if payment_options else "Свяжитесь с администратором для оплаты."
+        
         for chat_id, days_left in expiring_soon:
             try:
                 if days_left == 0:
-                    message = (
-                        "⏰ <b>Ваша подписка истекает сегодня!</b>\n\n"
-                        "Чтобы продолжить получать сигналы, свяжитесь с администратором "
-                        "для продления подписки.\n\n"
-                        "Используйте /mysettings для проверки статуса."
-                    )
+                    message = f"""⏰ <b>Ваша подписка истекает СЕГОДНЯ!</b>
+
+Не пропустите сигналы - продлите прямо сейчас:
+
+{payment_text}
+
+<b>📋 Периоды:</b>
+• 1 месяц
+• 3 месяца
+• 6 месяцев
+
+После оплаты отправьте скриншот администратору.
+
+Используйте /mysettings для проверки статуса."""
                 else:
-                    message = (
-                        f"⏰ <b>Ваша подписка истекает через {days_left} дн.!</b>\n\n"
-                        f"Не забудьте продлить подписку, чтобы продолжить получать сигналы.\n\n"
-                        f"Свяжитесь с администратором для продления."
-                    )
+                    message = f"""⏰ <b>Ваша подписка истекает через {days_left} дн.!</b>
+
+Продлите заранее, чтобы не прерывать получение сигналов:
+
+{payment_text}
+
+<b>📋 Периоды:</b>
+• 1 месяц
+• 3 месяца
+• 6 месяцев
+
+После оплаты отправьте скриншот администратору."""
                 
                 await self.bot.send_message(
                     chat_id=chat_id,
                     text=message,
                     parse_mode=ParseMode.HTML
                 )
-                logger.info(f"Sent expiry warning to {chat_id} ({days_left} days left)")
+                logger.info(f"Sent expiry warning with payment options to {chat_id} ({days_left} days left)")
             except Exception as e:
                 logger.error(f"Failed to notify expiring user {chat_id}: {e}")
     
     async def notify_expired_users(self, expired: list[str]):
-        """Send expiry notification to users whose subscription just expired."""
+        """Send expiry notification to users whose subscription just expired with payment options."""
+        from config import config
+        
+        # Build payment message based on available payment methods
+        payment_options = []
+        
+        if config.STRIPE_PAYMENT_LINK:
+            payment_options.append(f"💳 <b>Оплата картой:</b> {config.STRIPE_PAYMENT_LINK}")
+        
+        if config.CRYPTO_WALLET_USDT:
+            payment_options.append(
+                f"💎 <b>Криптовалюта (USDT {config.CRYPTO_NETWORK}):</b>\n"
+                f"<code>{config.CRYPTO_WALLET_USDT}</code>\n"
+                f"(нажмите чтобы скопировать)"
+            )
+        
+        payment_text = "\n\n".join(payment_options) if payment_options else "Свяжитесь с администратором для оплаты."
+        
         for chat_id in expired:
             try:
+                message = f"""🔴 <b>Ваша подписка истекла</b>
+
+Вы больше не будете получать сигналы.
+
+<b>💎 Продлите подписку:</b>
+
+{payment_text}
+
+<b>📋 Доступные периоды:</b>
+• 1 месяц
+• 3 месяца
+• 6 месяцев
+
+После оплаты отправьте скриншот администратору для активации.
+
+Спасибо за использование нашего бота! 🙏"""
+                
                 await self.bot.send_message(
                     chat_id=chat_id,
-                    text=(
-                        "🔴 <b>Ваша подписка истекла</b>\n\n"
-                        "Вы больше не будете получать сигналы.\n\n"
-                        "Чтобы возобновить подписку, свяжитесь с администратором.\n\n"
-                        "Спасибо за использование нашего бота! 🙏"
-                    ),
+                    text=message,
                     parse_mode=ParseMode.HTML
                 )
-                logger.info(f"Sent expiry notification to {chat_id}")
+                logger.info(f"Sent expiry notification with payment options to {chat_id}")
             except Exception as e:
                 logger.error(f"Failed to notify expired user {chat_id}: {e}")
     
