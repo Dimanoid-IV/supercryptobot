@@ -255,6 +255,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Handle new user callbacks
     if callback_data == "request_trial":
+        # Get user info
+        user = update.effective_user
+        chat_id = str(update.effective_chat.id)
+        
+        # Save pending request
+        _bot_instance.telegram_service.add_pending_request(
+            chat_id=chat_id,
+            username=user.username if user else None,
+            first_name=user.first_name if user else None
+        )
+        
         await query.edit_message_text(
             text="✅ <b>Запрос отправлен!</b>\n\n"
                  "Администратор скоро активирует ваш пробный период.\n"
@@ -264,17 +275,20 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         # Notify admin about trial request
-        user = update.effective_user
-        chat_id = str(update.effective_chat.id)
         try:
+            pending_count = len(_bot_instance.telegram_service.get_pending_requests())
             admin_msg = f"""⏰ <b>Запрос на пробный период!</b>
 
 👤 Имя: {user.first_name if user else 'N/A'}
 🔹 Username: @{user.username if user and user.username else 'N/A'}
 🆔 Chat ID: <code>{chat_id}</code>
 
+📋 Всего ожидает: {pending_count}
+
 Быстрое добавление:
 <code>/add_user {chat_id} 2</code>
+
+Или одобрите через веб-админку.
 """
             await _bot_instance.telegram_service.bot.send_message(
                 chat_id=_bot_instance.telegram_service.chat_id,

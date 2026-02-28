@@ -64,7 +64,10 @@ def create_app(telegram_service=None, config=None):
         """Main admin panel."""
         users = get_users_data()
         stats = calculate_stats(users)
-        return render_template('admin.html', users=users, stats=stats)
+        pending_requests = get_pending_requests_data()
+        all_users = get_all_users_data()
+        return render_template('admin.html', users=users, stats=stats, 
+                               pending_requests=pending_requests, all_users=all_users)
     
     @app.route('/admin/add_user', methods=['POST'])
     @login_required
@@ -133,6 +136,55 @@ def create_app(telegram_service=None, config=None):
                     flash(f'Пользователь {user_id} удален', 'success')
                 else:
                     flash('Пользователь не найден', 'error')
+            else:
+                flash('Сервис недоступен', 'error')
+        except Exception as e:
+            flash(f'Ошибка: {str(e)}', 'error')
+        
+        return redirect(url_for('admin'))
+    
+    @app.route('/admin/approve_request', methods=['POST'])
+    @login_required
+    def approve_request():
+        """Approve a pending trial request."""
+        user_id = request.form.get('user_id', '').strip()
+        days = int(request.form.get('days', 2))
+        
+        if not user_id:
+            flash('ID пользователя обязателен', 'error')
+            return redirect(url_for('admin'))
+        
+        try:
+            if app.telegram_service:
+                success, message = app.telegram_service.approve_request(user_id, days)
+                if success:
+                    flash(f'Запрос одобрен. Пользователь добавлен на {days} дн.', 'success')
+                else:
+                    flash(message, 'error')
+            else:
+                flash('Сервис недоступен', 'error')
+        except Exception as e:
+            flash(f'Ошибка: {str(e)}', 'error')
+        
+        return redirect(url_for('admin'))
+    
+    @app.route('/admin/reject_request', methods=['POST'])
+    @login_required
+    def reject_request():
+        """Reject a pending trial request."""
+        user_id = request.form.get('user_id', '').strip()
+        
+        if not user_id:
+            flash('ID пользователя обязателен', 'error')
+            return redirect(url_for('admin'))
+        
+        try:
+            if app.telegram_service:
+                success = app.telegram_service.reject_request(user_id)
+                if success:
+                    flash('Запрос отклонён', 'success')
+                else:
+                    flash('Запрос не найден', 'error')
             else:
                 flash('Сервис недоступен', 'error')
         except Exception as e:
@@ -239,5 +291,33 @@ def create_app(telegram_service=None, config=None):
             'expiring': expiring,
             'expired': expired
         }
+    
+    def get_pending_requests_data():
+        """Get all pending trial requests."""
+        if not app.telegram_service:
+            return []
+        
+        try:
+            requests = app.telegram_service.get_pending_requests()
+            # Sort by request time (newest first)
+            requests.sort(key=lambda x: x.get('requested_at', ''), reverse=True)
+            return requests
+        except Exception as e:
+            print(f"Error loading pending requests: {e}")
+            return []
+    
+    def get_all_users_data():
+        """Get all users who ever interacted with bot."""
+        if not app.telegram_service:
+            return []
+        
+        try:
+            users = app.telegram_service.get_all_users()
+            # Sort by first seen (newest first)
+            users.sort(key=lambda x: x.get('first_seen', ''), reverse=True)
+            return users
+        except Exception as e:
+            print(f"Error loading all users: {e}")
+            return []
     
     return app

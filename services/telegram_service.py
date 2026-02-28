@@ -147,6 +147,12 @@ class TelegramService:
         # Username to chat_id mapping (for adding users by @username)
         self.username_to_chat_id: dict[str, str] = self._load_username_mapping()
         
+        # Pending trial requests (users who requested trial but not yet approved)
+        self.pending_requests: dict[str, dict] = self._load_pending_requests()
+        
+        # All users who ever interacted with bot (for tracking)
+        self.all_users: dict[str, dict] = self._load_all_users()
+        
         # Signal control settings (admin/global)
         self.signals_enabled = True
         self.auto_start_time: Optional[time] = None  # e.g., time(9, 0) for 09:00
@@ -155,7 +161,7 @@ class TelegramService:
         # Callback for settings change
         self.on_settings_change: Optional[Callable] = None
         
-        logger.info(f"TelegramService initialized with {len(self.subscribers)} subscribers")
+        logger.info(f"TelegramService initialized with {len(self.subscribers)} subscribers, {len(self.pending_requests)} pending requests")
     
     def _load_username_mapping(self) -> dict[str, str]:
         """Load username to chat_id mapping from file."""
@@ -202,6 +208,145 @@ class TelegramService:
         """Resolve @username to chat_id."""
         username_clean = username.lstrip('@').lower()
         return self.username_to_chat_id.get(username_clean)
+    
+    def _load_pending_requests(self) -> dict[str, dict]:
+        """Load pending trial requests from file."""
+        if os.path.exists(self.subscribers_file):
+            try:
+                with open(self.subscribers_file, 'r') as f:
+                    data = json.load(f)
+                    return data.get('pending_requests', {})
+            except Exception as e:
+                logger.error(f"Failed to load pending requests: {e}")
+        return {}
+    
+    def _save_pending_requests(self):
+        """Save pending trial requests to file."""
+        try:
+            data = {}
+            if os.path.exists(self.subscribers_file):
+                with open(self.subscribers_file, 'r') as f:
+                    data = json.load(f)
+            
+            data['pending_requests'] = self.pending_requests
+            
+            with open(self.subscribers_file, 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logger.error(f"Failed to save pending requests: {e}")
+    
+    def _load_all_users(self) -> dict[str, dict]:
+        """Load all users who ever interacted with bot."""
+        if os.path.exists(self.subscribers_file):
+            try:
+                with open(self.subscribers_file, 'r') as f:
+                    data = json.load(f)
+                    return data.get('all_users', {})
+            except Exception as e:
+                logger.error(f"Failed to load all users: {e}")
+        return {}
+    
+    def _save_all_users(self):
+        """Save all users to file."""
+        try:
+            data = {}
+            if os.path.exists(self.subscribers_file):
+                with open(self.subscribers_file, 'r') as f:
+                    data = json.load(f)
+            
+            data['all_users'] = self.all_users
+            
+            with open(self.subscribers_file, 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logger.error(f"Failed to save all users: {e}")
+    
+    def add_pending_request(self, chat_id: str, username: Optional[str], first_name: Optional[str]):
+        """Add a new trial request."""
+        from datetime import datetime
+        
+        chat_id_str = str(chat_id)
+        self.pending_requests[chat_id_str] = {
+            'chat_id': chat_id_str,
+            'username': username,
+            'first_name': first_name,
+            'requested_at': datetime.now().isoformat(),
+            'status': 'pending'
+        }
+        
+        # Also add to all users
+        self.all_users[chat_id_str] = {
+            'chat_id': chat_id_str,
+            'username': username,
+            'first_name': first_name,
+            'first_seen': datetime.now().isoformat()
+        }
+        
+        self._save_pending_requests()
+        self._save_all_users()
+        logger.info(f"New trial request from {username or chat_id}")
+    
+    def approve_request(self, chat_id: str, days: int = 2) -> tuple[bool, str]:
+        """Approve a pending request and add user as subscriber."""
+        chat_id_str = str(chat_id)
+        
+        if chat_id_str not in self.pending_requests:
+            return False, "Запрос не найден"
+        
+        # Add as subscriber
+        success, message = self.add_subscriber(chat_id_str, days)
+        
+        if success:
+            # Update request status
+            self.pending_requests[chat_id_str]['status'] = 'approved'
+            self.pending_requests[chat_id_str]['approved_at'] = datetime.now().isoformat()
+            self._save_pending_requests()
+            
+            # Notify user
+            try:
+                self.bot.send_message(
+                    chat_id=chat_id_str,
+                    text=f"✅ <b>Ваш пробный период активирован!</b>\n\nВы будете получать сигналы в течение {days} дней.\n\nИспользуйте /mysettings для настройки.",
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify approved user: {e}")
+        
+        return success, message
+    
+    def reject_request(self, chat_id: str) -> bool:
+        """Reject a pending request."""
+        chat_id_str = str(chat_id)
+        
+        if chat_id_str not in self.pending_requests:
+            return False
+        
+        self.pending_requests[chat_id_str]['status'] = 'rejected'
+        self.pending_requests[chat_id_str]['rejected_at'] = datetime.now().isoformat()
+        self._save_pending_requests()
+        
+        # Notify user
+        try:
+            self.bot.send_message(
+                chat_id=chat_id_str,
+                text="❌ <b>К сожалению, ваш запрос отклонён.</b>\n\nОбратитесь в поддержку для уточнения причин.",
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify rejected user: {e}")
+        
+        return True
+    
+    def get_pending_requests(self) -> list[dict]:
+        """Get all pending requests."""
+        return [
+            req for req in self.pending_requests.values()
+            if req.get('status') == 'pending'
+        ]
+    
+    def get_all_users(self) -> list[dict]:
+        """Get all users who ever interacted with bot."""
+        return list(self.all_users.values())
     
     def _load_subscribers(self) -> List[str]:
         """Load subscriber chat IDs from file."""

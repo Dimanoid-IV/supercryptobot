@@ -27,7 +27,7 @@
     <!-- Statistics -->
     <div class="stats-grid">
         <div class="stat-card total">
-            <h3>Всего пользователей</h3>
+            <h3>Всего подписчиков</h3>
             <div class="number">{{ stats.total }}</div>
         </div>
         <div class="stat-card active">
@@ -39,9 +39,56 @@
             <div class="number">{{ stats.expiring }}</div>
         </div>
         <div class="stat-card expired">
-            <h3>Истекли</h3>
-            <div class="number">{{ stats.expired }}</div>
+            <h3>Ожидают доступа</h3>
+            <div class="number">{{ pending_requests|length }}</div>
         </div>
+    </div>
+
+    <!-- Pending Requests -->
+    <div class="card">
+        <h2>⏳ Запросы на пробный период ({{ pending_requests|length }})</h2>
+        {% if pending_requests %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Chat ID</th>
+                    <th>Username</th>
+                    <th>Имя</th>
+                    <th>Запрошен</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for req in pending_requests %}
+                <tr>
+                    <td>{{ req.chat_id[:20] }}{% if req.chat_id|length > 20 %}...{% endif %}</td>
+                    <td>@{{ req.username or 'N/A' }}</td>
+                    <td>{{ req.first_name or 'N/A' }}</td>
+                    <td>{{ req.requested_at[:16] if req.requested_at else '-' }}</td>
+                    <td class="actions">
+                        <form method="POST" action="{{ url_for('approve_request') }}" style="display: inline;">
+                            <input type="hidden" name="user_id" value="{{ req.chat_id }}">
+                            <select name="days" style="width: auto; display: inline; padding: 4px 8px; font-size: 12px;">
+                                <option value="2">2 дня</option>
+                                <option value="30">30 дней</option>
+                                <option value="90">90 дней</option>
+                            </select>
+                            <button type="submit" class="btn btn-primary btn-small">✅ Одобрить</button>
+                        </form>
+                        <form method="POST" action="{{ url_for('reject_request') }}" style="display: inline; margin-left: 5px;">
+                            <input type="hidden" name="user_id" value="{{ req.chat_id }}">
+                            <button type="submit" class="btn btn-danger btn-small">❌ Отклонить</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="color: #90a4ae; text-align: center; padding: 20px;">
+            Нет ожидающих запросов.
+        </p>
+        {% endif %}
     </div>
 
     <!-- Add User Form -->
@@ -149,6 +196,37 @@
         {% else %}
         <p style="color: #90a4ae; text-align: center; padding: 40px;">
             Пользователей пока нет. Добавьте первого пользователя выше.
+        </p>
+        {% endif %}
+    </div>
+
+    <!-- All Users (ever interacted) -->
+    <div class="card">
+        <h2>👤 Все пользователи (взаимодействовали с ботом) - {{ all_users|length }}</h2>
+        {% if all_users %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Chat ID</th>
+                    <th>Username</th>
+                    <th>Имя</th>
+                    <th>Первое обращение</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in all_users %}
+                <tr>
+                    <td>{{ user.chat_id[:20] }}{% if user.chat_id|length > 20 %}...{% endif %}</td>
+                    <td>@{{ user.username or 'N/A' }}</td>
+                    <td>{{ user.first_name or 'N/A' }}</td>
+                    <td>{{ user.first_seen[:16] if user.first_seen else '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="color: #90a4ae; text-align: center; padding: 20px;">
+            Пока нет пользователей.
         </p>
         {% endif %}
     </div>
