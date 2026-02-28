@@ -23,8 +23,8 @@ class Config:
     BYBIT_TESTNET: bool = False
     
     # Scanning settings
-    SCAN_INTERVAL_SECONDS: int = 90  # Reduced from 120s to 90s for more frequent scans
-    TOP_PAIRS_COUNT: int = 10  # Increased from 5 to 10 pairs to analyze
+    SCAN_INTERVAL_SECONDS: int = 300  # 5 minutes between scans for stable signal flow
+    TOP_PAIRS_COUNT: int = 5  # Analyze top 5 pairs only to prevent signal bursts
     
     # Timeframes
     TIMEFRAME_TREND: str = "15"  # 15 minutes for trend detection
@@ -52,8 +52,8 @@ class Config:
     SCORE_OI_CONFIRMATION: int = 15
     
     # Signal filters
-    MAX_SIGNALS_PER_DAY: int = 1000  # Unlimited signals (high limit for continuous flow)
-    MIN_HOURS_BETWEEN_SIGNALS_SAME_PAIR: int = 0  # No cooldown between signals on same pair
+    MAX_SIGNALS_PER_DAY: int = 50  # Reasonable limit for quality signals
+    MIN_HOURS_BETWEEN_SIGNALS_SAME_PAIR: int = 4  # 4 hours cooldown between signals on same pair
     MAX_CANDLE_ATR_MULTIPLIER: float = 4.0  # Increased from 3.0 to allow more signals
     
     # Funding rate limits (avoid extreme values)
