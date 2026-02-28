@@ -153,15 +153,18 @@ def create_app(telegram_service=None, config=None):
     def get_users_data():
         """Get all users data from telegram service."""
         users = []
-        
+
         if not app.telegram_service:
             return users
-        
+
         try:
             for chat_id in app.telegram_service.subscribers:
-                settings = app.telegram_service.user_settings.get(chat_id, {})
-                expiry = settings.get('subscription_expiry')
-                
+                settings = app.telegram_service.user_settings.get(chat_id)
+                if not settings:
+                    continue
+
+                expiry = settings.subscription_expiry
+
                 # Calculate days left
                 days_left = None
                 status = 'active'
@@ -172,52 +175,52 @@ def create_app(telegram_service=None, config=None):
                         status = 'expired'
                     elif days_left <= 3:
                         status = 'expiring'
-                
+
                 users.append({
                     'chat_id': chat_id,
-                    'username': settings.get('username', 'N/A'),
-                    'added_date': settings.get('added_date', 'N/A'),
+                    'username': getattr(settings, 'username', 'N/A'),
+                    'added_date': settings.added_date or 'N/A',
                     'expiry': expiry or 'N/A',
                     'days_left': days_left,
                     'status': status,
-                    'signals_enabled': settings.get('signals_enabled', True),
-                    'min_confidence': settings.get('min_confidence', 75)
+                    'signals_enabled': settings.signals_enabled,
+                    'min_confidence': settings.min_confidence
                 })
         except Exception as e:
             print(f"Error loading users: {e}")
-        
+
         # Sort by status (expired first, then expiring, then active)
         status_order = {'expired': 0, 'expiring': 1, 'active': 2}
         users.sort(key=lambda x: (status_order.get(x['status'], 3), x.get('days_left') or 999))
-        
+
         return users
     
     def get_user_data(user_id):
         """Get single user data."""
         if not app.telegram_service:
             return None
-        
+
         try:
-            settings = app.telegram_service.user_settings.get(user_id, {})
+            settings = app.telegram_service.user_settings.get(user_id)
             if not settings:
                 return None
-            
-            expiry = settings.get('subscription_expiry')
+
+            expiry = settings.subscription_expiry
             days_left = None
             if expiry:
                 expiry_date = datetime.fromisoformat(expiry)
                 days_left = (expiry_date - datetime.now()).days
-            
+
             return {
                 'chat_id': user_id,
-                'username': settings.get('username', 'N/A'),
-                'added_date': settings.get('added_date', 'N/A'),
+                'username': getattr(settings, 'username', 'N/A'),
+                'added_date': settings.added_date or 'N/A',
                 'expiry': expiry or 'N/A',
                 'days_left': days_left,
-                'signals_enabled': settings.get('signals_enabled', True),
-                'min_confidence': settings.get('min_confidence', 75),
-                'schedule_start': settings.get('schedule_start'),
-                'schedule_end': settings.get('schedule_end')
+                'signals_enabled': settings.signals_enabled,
+                'min_confidence': settings.min_confidence,
+                'schedule_start': settings.schedule_start,
+                'schedule_end': settings.schedule_end
             }
         except Exception as e:
             print(f"Error loading user: {e}")
