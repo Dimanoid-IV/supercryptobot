@@ -222,6 +222,40 @@ async def setconf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Укажите число от 50 до 95")
 
 
+async def set_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /set command - show settings menu with buttons."""
+    if not _bot_instance:
+        return
+    
+    chat_id = str(update.effective_chat.id)
+    settings = _bot_instance.telegram_service.get_user_settings(chat_id)
+    
+    # Create keyboard with confidence buttons
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"{'✅ ' if settings.min_confidence == 75 else ''}75%", callback_data="setconf_75"),
+         InlineKeyboardButton(f"{'✅ ' if settings.min_confidence == 80 else ''}80%", callback_data="setconf_80"),
+         InlineKeyboardButton(f"{'✅ ' if settings.min_confidence == 85 else ''}85%", callback_data="setconf_85")],
+        [InlineKeyboardButton(f"{'✅ ' if settings.min_confidence == 90 else ''}90%", callback_data="setconf_90"),
+         InlineKeyboardButton(f"{'✅ ' if settings.min_confidence == 95 else ''}95%", callback_data="setconf_95")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="mysettings")]
+    ])
+    
+    message = f"""⚙️ <b>Настройка минимального confidence</b>
+
+Текущее значение: <b>{settings.min_confidence}%</b>
+
+Выберите новое значение:
+• 75% - Больше сигналов, меньше точность
+• 80% - Баланс (рекомендуется)
+• 85% - Меньше сигналов, выше точность
+• 90% - Только лучшие сигналы
+• 95% - Очень редкие, но качественные
+
+<i>Чем выше confidence, тем меньше сигналов вы получите.</i>"""
+    
+    await update.message.reply_text(message, parse_mode='HTML', reply_markup=keyboard)
+
+
 async def setschedule_day_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /setschedule_day command - set day schedule for user."""
     if not _bot_instance:

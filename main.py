@@ -10,13 +10,13 @@ import sys
 import threading
 from typing import List, Optional
 
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 from config import config
 from utils.helpers import logger, CooldownManager
 from services.bybit_service import BybitService
-from services.telegram_service import TelegramService, SignalMessage
+from services.telegram_service import TelegramService
 from scanner.market_scanner import MarketScanner, VolatilePair
 from strategy.signal_logic import SignalGenerator, TradingSignal, SignalDirection
 
@@ -320,6 +320,68 @@ Confidence: 82%</code>
         )
         return
     
+    # Handle setconf callbacks
+    if callback_data.startswith("setconf_"):
+        conf_value = int(callback_data.split("_")[1])
+        chat_id = str(update.effective_chat.id)
+        _bot_instance.telegram_service.update_user_settings(chat_id, min_confidence=conf_value)
+        
+        # Show updated menu
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"{'✅ ' if conf_value == 75 else ''}75%", callback_data="setconf_75"),
+             InlineKeyboardButton(f"{'✅ ' if conf_value == 80 else ''}80%", callback_data="setconf_80"),
+             InlineKeyboardButton(f"{'✅ ' if conf_value == 85 else ''}85%", callback_data="setconf_85")],
+            [InlineKeyboardButton(f"{'✅ ' if conf_value == 90 else ''}90%", callback_data="setconf_90"),
+             InlineKeyboardButton(f"{'✅ ' if conf_value == 95 else ''}95%", callback_data="setconf_95")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="mysettings")]
+        ])
+        
+        await query.edit_message_text(
+            text=f"""⚙️ <b>Настройка минимального confidence</b>
+
+✅ Установлено: <b>{conf_value}%</b>
+
+Выберите новое значение:
+• 75% - Больше сигналов, меньше точность
+• 80% - Баланс (рекомендуется)
+• 85% - Меньше сигналов, выше точность
+• 90% - Только лучшие сигналы
+• 95% - Очень редкие, но качественные
+
+<i>Чем выше confidence, тем меньше сигналов вы получите.</i>""",
+            parse_mode='HTML',
+            reply_markup=keyboard
+        )
+        return
+    
+    # Handle mysettings callback
+    if callback_data == "mysettings":
+        chat_id = str(update.effective_chat.id)
+        settings = _bot_instance.telegram_service.get_user_settings(chat_id)
+        
+        schedule_str = "24/7 (без ограничений)"
+        if settings.schedule_start and settings.schedule_end:
+            schedule_str = f"{settings.schedule_start} - {settings.schedule_end}"
+        
+        status = "🟢 Включены" if settings.signals_enabled else "🔴 Отключены"
+        
+        message = f"""⚙️ <b>Ваши настройки:</b>
+
+📊 <b>Сигналы:</b> {status}
+🎯 <b>Мин. confidence:</b> {settings.min_confidence}%
+📅 <b>Расписание:</b> {schedule_str}
+
+<b>Команды для изменения:</b>
+• /toggle - Вкл/выкл сигналы
+• /set - Изменить confidence (кнопками)
+• /setconf 80 - Изменить confidence (текстом)
+• /setschedule_day - День (09:00-21:00)
+• /setschedule_night - Ночь (21:00-09:00)
+• /setschedule_always - 24/7
+"""
+        await query.edit_message_text(text=message, parse_mode='HTML')
+        return
+    
     # Handle existing control menu callbacks
     result = await _bot_instance.telegram_service.handle_callback(callback_data)
     await query.edit_message_text(
@@ -413,6 +475,7 @@ async def run_telegram_app(bot: CryptoSignalBot):
     application.add_handler(CommandHandler("schedule_always", user_commands.schedule_always_command))
     application.add_handler(CommandHandler("mysettings", user_commands.mysettings_command))
     application.add_handler(CommandHandler("toggle", user_commands.toggle_command))
+    application.add_handler(CommandHandler("set", user_commands.set_command))
     application.add_handler(CommandHandler("setconf", user_commands.setconf_command))
     application.add_handler(CommandHandler("setschedule_day", user_commands.setschedule_day_command))
     application.add_handler(CommandHandler("setschedule_night", user_commands.setschedule_night_command))

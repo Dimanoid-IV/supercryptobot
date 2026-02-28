@@ -44,6 +44,7 @@ class UserSettings:
     max_signals_per_day: int = 1000  # Default high limit
     subscription_expiry: Optional[str] = None  # ISO format date or None
     added_date: Optional[str] = None  # ISO format date when user was added
+    username: Optional[str] = None  # Telegram username for reference
     
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -55,7 +56,8 @@ class UserSettings:
             'schedule_end': self.schedule_end,
             'max_signals_per_day': self.max_signals_per_day,
             'subscription_expiry': self.subscription_expiry,
-            'added_date': self.added_date
+            'added_date': self.added_date,
+            'username': self.username
         }
     
     @classmethod
@@ -69,7 +71,8 @@ class UserSettings:
             schedule_end=data.get('schedule_end'),
             max_signals_per_day=data.get('max_signals_per_day', 1000),
             subscription_expiry=data.get('subscription_expiry'),
-            added_date=data.get('added_date')
+            added_date=data.get('added_date'),
+            username=data.get('username')
         )
     
     def is_signals_allowed_now(self) -> bool:
@@ -186,6 +189,13 @@ class TelegramService:
             username_clean = username.lstrip('@').lower()
             self.username_to_chat_id[username_clean] = str(chat_id)
             self._save_username_mapping()
+            
+            # Also save username in user settings
+            settings = self.get_user_settings(chat_id)
+            settings.username = username_clean
+            self.user_settings[str(chat_id)] = settings
+            self._save_subscribers()
+            
             logger.info(f"Registered username @{username_clean} -> {chat_id}")
     
     def resolve_username(self, username: str) -> Optional[str]:
