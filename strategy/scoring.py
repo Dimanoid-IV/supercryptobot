@@ -15,12 +15,19 @@ from utils.helpers import logger
 @dataclass
 class ScoreBreakdown:
     """Detailed breakdown of signal score."""
+    # Base scores (existing)
     trend_alignment: int = 0
     ema_pullback: int = 0
     rsi_zone: int = 0
     volume_spike: int = 0
     atr_level: int = 0
     oi_confirmation: int = 0
+    
+    # Enhanced scores (new)
+    htf_trend_filter: int = 0  # HTF EMA50/EMA200 alignment
+    volume_anomaly: int = 0  # Volume > 2x average
+    oi_trend_confirmation: int = 0  # OI confirms price direction
+    market_regime: int = 0  # Trending vs flat market adjustment
     
     @property
     def total(self) -> int:
@@ -34,6 +41,17 @@ class ScoreBreakdown:
             self.oi_confirmation
         )
     
+    @property
+    def weighted_total(self) -> int:
+        """Calculate weighted score with enhanced factors."""
+        return (
+            self.total +
+            self.htf_trend_filter +
+            self.volume_anomaly +
+            self.oi_trend_confirmation +
+            self.market_regime
+        )
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for logging."""
         return {
@@ -43,7 +61,12 @@ class ScoreBreakdown:
             "volume_spike": self.volume_spike,
             "atr_level": self.atr_level,
             "oi_confirmation": self.oi_confirmation,
-            "total": self.total
+            "total": self.total,
+            "htf_trend_filter": self.htf_trend_filter,
+            "volume_anomaly": self.volume_anomaly,
+            "oi_trend_confirmation": self.oi_trend_confirmation,
+            "market_regime": self.market_regime,
+            "weighted_total": self.weighted_total
         }
 
 
@@ -283,3 +306,68 @@ class SignalScorer:
         logger.info(f"  ATR Level: {breakdown.atr_level}/{config.SCORE_ATR_LEVEL}")
         logger.info(f"  OI Confirmation: {breakdown.oi_confirmation}/{config.SCORE_OI_CONFIRMATION}")
         logger.info(f"  TOTAL: {breakdown.total}/{config.MAX_SCORE}")
+        
+        # Log enhanced scores if enabled
+        if config.ENABLE_WEIGHTED_SCORE:
+            logger.info(f"  HTF Trend Filter: {breakdown.htf_trend_filter:+d}")
+            logger.info(f"  Volume Anomaly: {breakdown.volume_anomaly:+d}")
+            logger.info(f"  OI Trend Confirmation: {breakdown.oi_trend_confirmation:+d}")
+            logger.info(f"  Market Regime: {breakdown.market_regime:+d}")
+            logger.info(f"  WEIGHTED TOTAL: {breakdown.weighted_total}")
+    
+    def calculate_enhanced_scores(
+        self,
+        breakdown: ScoreBreakdown,
+        htf_trend_aligned: bool = False,
+        volume_anomaly: bool = False,
+        oi_confirms_trend: bool = False,
+        is_trending_market: bool = False,
+        signal_direction: str = ""
+    ) -> ScoreBreakdown:
+        """
+        Calculate enhanced score components.
+        
+        Args:
+            breakdown: Base ScoreBreakdown to enhance
+            htf_trend_aligned: Whether 4H trend aligns with signal
+            volume_anomaly: Whether volume > 2x average
+            oi_confirms_trend: Whether OI confirms price direction
+            is_trending_market: Whether ADX > 25
+            signal_direction: "LONG" or "SHORT"
+            
+        Returns:
+            Updated ScoreBreakdown with enhanced scores
+        """
+        try:
+            # HTF Trend Filter bonus
+            if config.ENABLE_HTF_FILTER and htf_trend_aligned:
+                breakdown.htf_trend_filter = config.SCORE_TREND_ALIGNMENT // 2  # Half of trend score
+                logger.debug(f"HTF trend aligned for {signal_direction}: +{breakdown.htf_trend_filter}")
+            
+            # Volume Anomaly bonus
+            if config.ENABLE_VOLUME_ANOMALY and volume_anomaly:
+                breakdown.volume_anomaly = config.VOLUME_ANOMALY_BOOST
+                logger.debug(f"Volume anomaly detected: +{breakdown.volume_anomaly}")
+            
+            # OI Trend Confirmation bonus
+            if config.ENABLE_OI_FILTER and oi_confirms_trend:
+                breakdown.oi_trend_confirmation = config.OI_TREND_SCORE_BOOST
+                logger.debug(f"OI confirms trend: +{breakdown.oi_trend_confirmation}")
+            
+            # Market Regime adjustment
+            if config.ENABLE_MARKET_REGIME:
+                if is_trending_market:
+                    # Boost trend-following signals in trending markets
+                    if signal_direction in ["LONG", "SHORT"]:
+                        breakdown.market_regime = config.TREND_REGIME_BOOST
+                        logger.debug(f"Trending market regime: +{breakdown.market_regime}")
+                else:
+                    # Penalize signals in flat markets
+                    breakdown.market_regime = config.FLAT_REGIME_PENALTY
+                    logger.debug(f"Flat market regime: {breakdown.market_regime}")
+            
+        except Exception as e:
+            logger.error(f"Error calculating enhanced scores: {e}")
+            # Continue with base scores on error
+        
+        return breakdown

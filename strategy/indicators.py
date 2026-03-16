@@ -21,6 +21,10 @@ class IndicatorValues:
     ema_50: Optional[float] = None
     ema_200: Optional[float] = None
     
+    # HTF EMA values (4H)
+    htf_ema_50: Optional[float] = None
+    htf_ema_200: Optional[float] = None
+    
     # RSI
     rsi: Optional[float] = None
     
@@ -31,6 +35,11 @@ class IndicatorValues:
     # Volume
     volume_sma: Optional[float] = None
     volume_ratio: Optional[float] = None  # Current volume / SMA
+    volume_anomaly: bool = False  # Volume > 2x average
+    
+    # ADX (Market Regime)
+    adx: Optional[float] = None
+    is_trending: bool = False  # ADX > 25
     
     # Price data
     current_price: Optional[float] = None
@@ -117,6 +126,55 @@ class Indicators:
             return pd.Series([np.nan] * len(df))
         return df["volume"].rolling(window=period).mean()
     
+    @staticmethod
+    def calculate_adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
+        """
+        Calculate Average Directional Index (ADX) using pandas.
+        
+        Args:
+            df: DataFrame with OHLCV data
+            period: ADX period
+            
+        Returns:
+            Series with ADX values (0-100)
+        """
+        if len(df) < period * 2:
+            return pd.Series([np.nan] * len(df))
+        
+        # Calculate True Range
+        high_low = df["high"] - df["low"]
+        high_close = np.abs(df["high"] - df["close"].shift())
+        low_close = np.abs(df["low"] - df["close"].shift())
+        ranges = pd.concat([high_low, high_close, low_close], axis=1)
+        true_range = np.max(ranges, axis=1)
+        
+        # Calculate +DM and -DM
+        plus_dm = df["high"].diff()
+        minus_dm = -df["low"].diff()
+        
+        plus_dm[plus_dm < 0] = 0
+        minus_dm[minus_dm < 0] = 0
+        
+        plus_dm[plus_dm <= minus_dm] = 0
+        minus_dm[minus_dm <= plus_dm] = 0
+        
+        # Smooth TR, +DM, -DM
+        tr_smooth = true_range.rolling(window=period).mean()
+        plus_dm_smooth = plus_dm.rolling(window=period).mean()
+        minus_dm_smooth = minus_dm.rolling(window=period).mean()
+        
+        # Calculate +DI and -DI
+        plus_di = 100 * plus_dm_smooth / tr_smooth
+        minus_di = 100 * minus_dm_smooth / tr_smooth
+        
+        # Calculate DX
+        dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di)
+        
+        # Calculate ADX
+        adx = dx.rolling(window=period).mean()
+        
+        return adx
+    
     @classmethod
     def calculate_all(cls, df: pd.DataFrame) -> IndicatorValues:
         """
@@ -150,6 +208,9 @@ class Indicators:
             # Calculate Volume SMA
             df.loc[:, "volume_sma"] = cls.calculate_volume_sma(df, config.VOLUME_SMA_PERIOD)
             
+            # Calculate ADX for market regime detection
+            df.loc[:, "adx"] = cls.calculate_adx(df, config.ADX_PERIOD)
+            
             # Get latest values
             latest = df.iloc[-1]
             current_price = latest["close"]
@@ -163,6 +224,13 @@ class Indicators:
             volume_sma = latest["volume_sma"] if pd.notna(latest["volume_sma"]) else 0
             volume_ratio = safe_divide(current_volume, volume_sma, 1.0)
             
+            # Volume anomaly detection (volume > 2x average)
+            volume_anomaly = volume_ratio >= config.VOLUME_ANOMALY_THRESHOLD if config.ENABLE_VOLUME_ANOMALY else False
+            
+            # Market regime detection (ADX > 25 = trending)
+            adx_value = latest["adx"] if pd.notna(latest["adx"]) else 0
+            is_trending = adx_value >= config.ADX_TREND_THRESHOLD if config.ENABLE_MARKET_REGIME else False
+            
             return IndicatorValues(
                 ema_21=latest["ema_21"] if pd.notna(latest["ema_21"]) else None,
                 ema_50=latest["ema_50"] if pd.notna(latest["ema_50"]) else None,
@@ -172,6 +240,9 @@ class Indicators:
                 atr_ratio=atr_ratio,
                 volume_sma=volume_sma,
                 volume_ratio=volume_ratio,
+                volume_anomaly=volume_anomaly,
+                adx=adx_value,
+                is_trending=is_trending,
                 current_price=current_price,
                 current_volume=current_volume
             )

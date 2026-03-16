@@ -97,6 +97,38 @@ class Config:
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     
+    # === ENHANCED SIGNAL ANALYSIS (New Features) ===
+    # All features are opt-in via feature flags for safe rollout
+    
+    # 1. HTF Trend Filter (4H timeframe)
+    ENABLE_HTF_FILTER: bool = True  # Enable 4H EMA50/EMA200 trend filter
+    TIMEFRAME_HTF: str = "240"  # 4H for higher timeframe analysis
+    
+    # 2. Volume Anomaly Detection
+    ENABLE_VOLUME_ANOMALY: bool = True  # Enable volume spike detection
+    VOLUME_ANOMALY_THRESHOLD: float = 2.0  # Current volume > 2x average
+    VOLUME_ANOMALY_BOOST: int = 10  # Additional score points for volume anomaly
+    
+    # 3. Open Interest Confirmation
+    ENABLE_OI_FILTER: bool = True  # Enable OI-based signal confirmation
+    OI_CONFIRMATION_THRESHOLD: float = 1.0  # OI change % threshold
+    OI_TREND_SCORE_BOOST: int = 5  # Additional score for OI confirmation
+    
+    # 4. Market Regime Detection (ADX-based)
+    ENABLE_MARKET_REGIME: bool = True  # Enable trend/flat detection
+    ADX_PERIOD: int = 14  # ADX calculation period
+    ADX_TREND_THRESHOLD: float = 25.0  # ADX > 25 = trending market
+    TREND_REGIME_BOOST: int = 5  # Score boost in trending market
+    FLAT_REGIME_PENALTY: int = -5  # Score penalty in flat market
+    
+    # 5. Enhanced Scoring System
+    ENABLE_WEIGHTED_SCORE: bool = True  # Enable weighted scoring
+    HIGH_CONFIDENCE_THRESHOLD: int = 80  # 80+ = high confidence signals
+    
+    # 6. ATR-adaptive Stop Loss (optional)
+    ENABLE_ATR_ADAPTIVE_SL: bool = True  # Use ATR-based stop loss
+    ATR_SL_MULTIPLIER: float = 1.5  # SL = 1.5 * ATR
+    
     # Pair filters
     MIN_24H_VOLUME_USDT: float = 10_000_000  # Minimum $10M volume
     EXCLUDED_PAIRS: List[str] = None
