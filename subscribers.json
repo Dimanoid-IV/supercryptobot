@@ -1,4 +1,18 @@
 {
-  "chat_ids": [],
-  "user_settings": {}
+  "chat_ids": [
+    "123456789"
+  ],
+  "user_settings": {
+    "123456789": {
+      "chat_id": "123456789",
+      "signals_enabled": true,
+      "min_confidence": 75,
+      "schedule_start": null,
+      "schedule_end": null,
+      "max_signals_per_day": 1000,
+      "subscription_expiry": "2026-04-16T22:49:09.277334",
+      "added_date": "2026-03-17T22:49:09.277344",
+      "username": "test_user"
+    }
+  }
 }
