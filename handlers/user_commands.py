@@ -28,12 +28,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     chat_id = str(update.effective_chat.id)
     
-    # Register username for future reference
-    if user and user.username:
-        _bot_instance.telegram_service.register_username(user.username, chat_id)
-        logger.info(f"New user started bot: @{user.username} ({chat_id})")
+    # Register username for future reference and add to all_users
+    if user:
+        _bot_instance.telegram_service.register_username(
+            user.username, chat_id, user.first_name
+        )
+        logger.info(f"New user started bot: @{user.username or 'no_username'} ({chat_id})")
     else:
-        logger.info(f"New user started bot: {chat_id} (no username)")
+        logger.info(f"New user started bot: {chat_id} (no user info)")
     
     # Check if user already has subscription
     service = _bot_instance.telegram_service

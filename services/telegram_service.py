@@ -190,20 +190,33 @@ class TelegramService:
         except Exception as e:
             logger.error(f"Failed to save username mapping: {e}")
     
-    def register_username(self, username: str, chat_id: str):
+    def register_username(self, username: str, chat_id: str, first_name: str = None):
         """Register username to chat_id mapping when user interacts with bot."""
+        chat_id_str = str(chat_id)
+        username_clean = username.lstrip('@').lower() if username else None
+        
+        # Add to all_users (everyone who ever interacted with bot)
+        if chat_id_str not in self.all_users:
+            self.all_users[chat_id_str] = {
+                'chat_id': chat_id_str,
+                'username': username_clean,
+                'first_name': first_name,
+                'first_seen': datetime.now().isoformat()
+            }
+            self._save_all_users()
+            logger.info(f"New user added to all_users: {username_clean or chat_id_str}")
+        
         if username:
-            username_clean = username.lstrip('@').lower()
-            self.username_to_chat_id[username_clean] = str(chat_id)
+            self.username_to_chat_id[username_clean] = chat_id_str
             self._save_username_mapping()
             
             # Also save username in user settings
-            settings = self.get_user_settings(chat_id)
+            settings = self.get_user_settings(chat_id_str)
             settings.username = username_clean
-            self.user_settings[str(chat_id)] = settings
+            self.user_settings[chat_id_str] = settings
             self._save_subscribers()
             
-            logger.info(f"Registered username @{username_clean} -> {chat_id}")
+            logger.info(f"Registered username @{username_clean} -> {chat_id_str}")
     
     def resolve_username(self, username: str) -> Optional[str]:
         """Resolve @username to chat_id."""
