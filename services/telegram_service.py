@@ -5,6 +5,7 @@ Handles all Telegram bot interactions and message formatting.
 
 import json
 import os
+import subprocess
 from typing import Optional, Callable, List
 from dataclasses import dataclass
 from datetime import datetime, time
@@ -360,7 +361,7 @@ class TelegramService:
         return []
     
     def _save_subscribers(self):
-        """Save subscriber chat IDs to file."""
+        """Save subscriber chat IDs to file and commit to git."""
         try:
             data = {
                 'chat_ids': self.subscribers,
@@ -369,8 +370,49 @@ class TelegramService:
             with open(self.subscribers_file, 'w') as f:
                 json.dump(data, f, indent=2)
             logger.info(f"Subscribers saved: {len(self.subscribers)} total")
+            
+            # Auto-commit to git for persistence on Render
+            self._auto_commit()
         except Exception as e:
             logger.error(f"Failed to save subscribers: {e}")
+    
+    def _auto_commit(self):
+        """Auto-commit subscribers.json to git for persistence."""
+        try:
+            # Check if we're in a git repo
+            result = subprocess.run(
+                ['git', 'rev-parse', '--git-dir'],
+                capture_output=True,
+                text=True,
+                cwd=os.path.dirname(os.path.abspath(__file__))
+            )
+            if result.returncode != 0:
+                return  # Not a git repo
+            
+            # Check if file has changes
+            result = subprocess.run(
+                ['git', 'status', '--porcelain', self.subscribers_file],
+                capture_output=True,
+                text=True,
+                cwd=os.path.dirname(os.path.abspath(__file__))
+            )
+            if not result.stdout.strip():
+                return  # No changes to commit
+            
+            # Add and commit
+            subprocess.run(
+                ['git', 'add', self.subscribers_file],
+                capture_output=True,
+                cwd=os.path.dirname(os.path.abspath(__file__))
+            )
+            subprocess.run(
+                ['git', 'commit', '-m', f'Auto-update subscribers: {len(self.subscribers)} users'],
+                capture_output=True,
+                cwd=os.path.dirname(os.path.abspath(__file__))
+            )
+            logger.info(f"Auto-committed subscribers.json ({len(self.subscribers)} users)")
+        except Exception as e:
+            logger.debug(f"Auto-commit skipped: {e}")  # Debug level - not critical
     
     def _load_user_settings(self) -> dict[str, UserSettings]:
         """Load per-user settings from file."""

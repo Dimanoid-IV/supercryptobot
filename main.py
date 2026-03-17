@@ -6,6 +6,7 @@ Also starts web admin panel.
 
 import asyncio
 import os
+import subprocess
 import sys
 import threading
 from typing import List, Optional
@@ -25,6 +26,38 @@ from handlers import admin_commands, user_commands
 
 # Import web admin
 from web_admin import create_app
+
+
+def git_pull_on_startup():
+    """Pull latest changes from git to get updated subscribers.json."""
+    try:
+        # Get project root directory
+        project_root = os.path.dirname(os.path.abspath(__file__))
+        
+        # Check if we're in a git repo
+        result = subprocess.run(
+            ['git', 'rev-parse', '--git-dir'],
+            capture_output=True,
+            text=True,
+            cwd=project_root
+        )
+        if result.returncode != 0:
+            logger.debug("Not a git repository, skipping git pull")
+            return
+        
+        # Pull latest changes
+        result = subprocess.run(
+            ['git', 'pull', 'origin', 'main'],
+            capture_output=True,
+            text=True,
+            cwd=project_root
+        )
+        if result.returncode == 0:
+            logger.info("Git pull successful: subscribers data synced")
+        else:
+            logger.debug(f"Git pull skipped: {result.stderr}")
+    except Exception as e:
+        logger.debug(f"Git pull on startup failed: {e}")  # Non-critical
 
 
 class CryptoSignalBot:
@@ -524,6 +557,9 @@ def run_web_admin(bot: CryptoSignalBot):
 
 async def main():
     """Main entry point."""
+    # Pull latest subscribers data from git on startup
+    git_pull_on_startup()
+    
     bot = CryptoSignalBot()
     
     # Start web admin panel in separate thread
