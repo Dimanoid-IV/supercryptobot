@@ -412,7 +412,7 @@ class TelegramService:
             if not result.stdout.strip():
                 return  # No changes to commit
             
-            # Add and commit
+            # Add, commit and push
             subprocess.run(
                 ['git', 'add', self.subscribers_file],
                 capture_output=True,
@@ -423,7 +423,17 @@ class TelegramService:
                 capture_output=True,
                 cwd=os.path.dirname(os.path.abspath(__file__))
             )
-            logger.info(f"Auto-committed subscribers.json ({len(self.subscribers)} users)")
+            # Push to remote (for Render persistence)
+            push_result = subprocess.run(
+                ['git', 'push', 'origin', 'main'],
+                capture_output=True,
+                text=True,
+                cwd=os.path.dirname(os.path.abspath(__file__))
+            )
+            if push_result.returncode == 0:
+                logger.info(f"Auto-committed and pushed subscribers.json ({len(self.subscribers)} users)")
+            else:
+                logger.debug(f"Push skipped: {push_result.stderr}")
         except Exception as e:
             logger.debug(f"Auto-commit skipped: {e}")  # Debug level - not critical
     
